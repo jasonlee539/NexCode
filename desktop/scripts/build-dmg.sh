@@ -24,6 +24,7 @@ if [[ ! -d "$APP_PATH" ]]; then
   exit 1
 fi
 
+bash "$SCRIPT_DIR/assert-no-packaged-google-oauth.sh" "$APP_PATH"
 codesign --verify --deep --strict "$APP_PATH"
 
 mkdir -p "$DMG_ROOT"

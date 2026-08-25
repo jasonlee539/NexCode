@@ -1961,6 +1961,12 @@
   gap: 6px;
 }
 
+.desktop-thread-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .desktop-thread-row__side time {
   color: var(--desktop-muted);
   font-size: 8px;
@@ -1991,6 +1997,188 @@
 .desktop-inline-status.is-err {
   color: var(--danger);
   background: var(--danger-soft);
+}
+
+.desktop-thread-view {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.desktop-thread-view__toolbar,
+.desktop-thread-view__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.desktop-thread-view__back svg {
+  transform: rotate(180deg);
+}
+
+.desktop-thread-view__head {
+  padding: 12px 14px;
+  border: 1px solid var(--desktop-line);
+  border-radius: 11px;
+  background: var(--desktop-card);
+}
+
+.desktop-thread-view__head > div {
+  min-width: 0;
+}
+
+.desktop-thread-view__head span,
+.desktop-thread-view__head time {
+  color: var(--desktop-muted);
+  font-size: 10px;
+}
+
+.desktop-thread-view__head h2 {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-thread-view__head time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.desktop-thread-document {
+  min-width: 0;
+  min-height: 240px;
+  flex: 1 1 auto;
+  padding: 18px 20px;
+  overflow: auto;
+  border: 1px solid var(--desktop-line);
+  border-radius: 11px;
+  background: var(--desktop-card);
+}
+
+.desktop-markdown {
+  width: min(100%, 860px);
+  margin: 0 auto;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.desktop-markdown h1,
+.desktop-markdown h2,
+.desktop-markdown h3,
+.desktop-markdown h4,
+.desktop-markdown h5,
+.desktop-markdown h6 {
+  margin: 1.35em 0 0.55em;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.desktop-markdown h1:first-child,
+.desktop-markdown h2:first-child {
+  margin-top: 0;
+}
+
+.desktop-markdown h1 {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--desktop-line);
+  font-size: 21px;
+}
+
+.desktop-markdown h2 {
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--desktop-line);
+  font-size: 17px;
+}
+
+.desktop-markdown h3 { font-size: 15px; }
+.desktop-markdown h4,
+.desktop-markdown h5,
+.desktop-markdown h6 { font-size: 13px; }
+
+.desktop-markdown p {
+  margin: 0.65em 0;
+  white-space: pre-wrap;
+}
+
+.desktop-markdown ul,
+.desktop-markdown ol {
+  margin: 0.6em 0;
+  padding-left: 1.8em;
+}
+
+.desktop-markdown blockquote {
+  margin: 0.8em 0;
+  padding: 7px 12px;
+  border-left: 3px solid var(--desktop-green);
+  color: var(--desktop-muted);
+  background: var(--desktop-green-soft);
+  white-space: pre-wrap;
+}
+
+.desktop-markdown code {
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: var(--raised);
+  font: 0.92em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.desktop-markdown pre {
+  margin: 0.9em 0;
+  padding: 12px 14px;
+  overflow: auto;
+  border: 1px solid var(--desktop-line);
+  border-radius: 8px;
+  background: var(--raised);
+}
+
+.desktop-markdown pre code {
+  padding: 0;
+  background: transparent;
+  white-space: pre;
+}
+
+.desktop-markdown a {
+  color: var(--desktop-green-strong);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.desktop-markdown hr {
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--desktop-line);
+}
+
+.desktop-markdown__table-wrap {
+  margin: 0.9em 0;
+  overflow-x: auto;
+}
+
+.desktop-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.desktop-markdown th,
+.desktop-markdown td {
+  padding: 6px 8px;
+  border: 1px solid var(--desktop-line);
+  text-align: left;
+}
+
+.desktop-markdown th {
+  background: var(--raised);
+  font-weight: 650;
 }
 
 .desktop-page-loading,
@@ -2513,7 +2701,7 @@
 
 .desktop-home-main-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(275px, 0.9fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   flex: 1 1 auto;
   min-height: 330px;
   gap: 10px;
@@ -2964,8 +3152,8 @@
    shell owns this offset so Dashboard, Accounts, Threads, Skills, Maintenance
    and Settings always start on the same baseline. */
 .app--desktop .main {
-  height: calc(100dvh - 36px);
-  margin: 28px 8px 8px 0;
+  height: calc(100dvh - 44px);
+  margin: 36px 8px 8px 0;
 }
 
 /* Local Codex Token analytics. The structure follows the reference app's calm
@@ -3099,7 +3287,7 @@
 
 .desktop-usage-insights {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(220px, .75fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 

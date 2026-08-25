@@ -93,6 +93,12 @@ ditto "$ROOT_DIR/bin" "$RUNTIME_DIR/bin-launcher"
 ditto "$ROOT_DIR/assets" "$RUNTIME_DIR/assets"
 cp "$ROOT_DIR/package.json" "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/AGENTS_INSTALL.md" "$RUNTIME_DIR/"
 
+# Never let credentials from the maintainer's build shell become app resources.
+# The check deliberately runs after every runtime asset has been assembled and
+# before signing, so the signed .app and every DMG derived from it inherit the
+# same boundary.
+bash "$SCRIPT_DIR/assert-no-packaged-google-oauth.sh" "$STAGE_APP"
+
 CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFT_MODULECACHE_PATH="$MODULE_CACHE" \
   swift -sdk "$MACOS_SDK" "$ROOT_DIR/desktop/scripts/generate-icns.swift" \
   "$MASTER_ICON" "$RESOURCES_DIR/NexCode.icns"

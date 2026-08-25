@@ -593,6 +593,10 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
             decisionHandler(.cancel)
             return
         }
+        if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
+            return
+        }
         if shouldOpenExternally(url) {
             NSWorkspace.shared.open(url)
             decisionHandler(.cancel)

@@ -116,6 +116,12 @@ describe("desktop management routes", () => {
     expect(body.fileName).toBe("Desktop-thread.md");
     expect(body.markdown).toContain("## User\n\nBuild the feature");
     expect(body.markdown).toContain("## Assistant\n\nDone.");
+
+    const downloaded = await requestDesktop("/api/desktop/threads/thread-1/export?download=1", {}, deps);
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers.get("Content-Type")).toBe("text/markdown; charset=utf-8");
+    expect(downloaded.headers.get("Content-Disposition")).toContain("attachment; filename=\"Desktop-thread.md\"");
+    expect(await downloaded.text()).toContain("## User\n\nBuild the feature");
   });
 
   test("reports non-zero local Codex thread tokens for the 30-day dashboard", async () => {

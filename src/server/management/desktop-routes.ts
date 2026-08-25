@@ -34,7 +34,7 @@ import {
   type CodexWriterProcessCheck,
 } from "../../codex/log-guard/processes";
 import { scanStorage } from "../../storage/scanner";
-import { jsonResponse } from "../auth-cors";
+import { corsHeaders, jsonResponse } from "../auth-cors";
 import type { ManagementContext } from "./context";
 import { readManagementJsonBody, rethrowManagementBodyTooLarge } from "./body";
 
@@ -671,6 +671,17 @@ function safeFileStem(value: string): string {
   return stem || "codex-thread";
 }
 
+function attachmentContentDisposition(fileName: string): string {
+  const fallback = fileName
+    .normalize("NFKD")
+    .replace(/[^\x20-\x7e]+/g, "-")
+    .replace(/["\\]/g, "-") || "codex-thread.md";
+  const encoded = encodeURIComponent(fileName).replace(/[!'()*]/g, character =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
 type DesktopSkillScope = DesktopSkillSummary["scope"];
 
 interface DesktopSkillRoot {
@@ -1089,8 +1100,20 @@ export async function handleDesktopRoutes(ctx: ManagementContext): Promise<Respo
     if (!rollout) return jsonResponse({ error: "rollout_unavailable" }, 409, req, config);
     try {
       const markdown = rolloutMarkdown(record, readRolloutText(rollout));
+      const fileName = `${safeFileStem(record.title)}.md`;
+      if (url.searchParams.get("download") === "1") {
+        return new Response(markdown, {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store",
+            "Content-Disposition": attachmentContentDisposition(fileName),
+            "Content-Type": "text/markdown; charset=utf-8",
+            ...corsHeaders(req, config),
+          },
+        });
+      }
       return jsonResponse({
-        fileName: `${safeFileStem(record.title)}.md`,
+        fileName,
         markdown,
       }, 200, req, config);
     } catch (error) {

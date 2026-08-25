@@ -19,6 +19,14 @@ The installer is written to `dist/NexCode.dmg`. Set
 `NEXCODE_SKIP_APP_BUILD=1` to package an already-built `NexCode.app` without
 rebuilding it first.
 
+The app build copies only the runtime allowlist shown in `build-app.sh`; it does
+not copy the repository's `.env` files or the user's home/config directories.
+Before signing, packaging also scans the staged app for the configured Google
+OAuth client ID, client secret, and Google Cloud API key. The build fails
+without printing the credential if any configured value was captured in the
+app. Because DMG creation packages that verified `.app`, the same guarantee
+applies to both formats.
+
 The app starts the bundled proxy, discovers its actual loopback port, loads the
 dashboard in WebKit, opens external OAuth pages in the default browser, and asks
 the proxy to shut down cleanly when the app quits. The loopback service is an
