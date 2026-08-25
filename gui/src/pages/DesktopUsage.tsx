@@ -121,16 +121,20 @@ export default function DesktopUsage({ apiBase }: { apiBase: string }) {
       </section>
 
       <section className="desktop-usage-insights">
-        <article className="desktop-usage-panel desktop-usage-trend">
+        <article className="desktop-usage-panel desktop-usage-trend-panel">
           <header>
             <div><h3>{t("usage.trend")}</h3><p>{t("usage.trendHint")}</p></div>
             <span>{t(`usage.range${range}` as TKey)}</span>
           </header>
           {totals.totalTokens > 0 ? (
-            <div className="desktop-usage-chart" style={{ gridTemplateColumns: `repeat(${visibleDays.length}, minmax(10px, 1fr))` }}>
+            <div
+              className="desktop-usage-chart"
+              data-days={visibleDays.length}
+              style={{ gridTemplateColumns: `repeat(${Math.max(1, visibleDays.length)}, minmax(0, 1fr))` }}
+            >
               {visibleDays.map((day, index) => {
                 const height = Math.max(5, (day.totalTokens / maxDailyTokens) * 100);
-                const showLabel = visibleDays.length <= 7 || index % 5 === 0 || index === visibleDays.length - 1;
+                const showLabel = visibleDays.length <= 7 || index % 3 === 0 || index === visibleDays.length - 1;
                 return (
                   <div className="desktop-usage-chart__day" key={day.date} title={`${formatDate(day.date)} · ${formatCompactTokens(day.totalTokens)}`}>
                     <div><i style={{ height: `${height}%` }} /></div>

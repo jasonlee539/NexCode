@@ -86,7 +86,21 @@ cp "$ROOT_DIR/desktop/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$BUN_BIN" "$RUNTIME_DIR/bin/bun"
 chmod 755 "$RUNTIME_DIR/bin/bun" "$MACOS_DIR/NexCode"
 
-ditto "$ROOT_DIR/src" "$RUNTIME_DIR/src"
+# Finder metadata is neither needed nor reliable inside a signed runtime bundle.
+# rsync avoids copying extended attributes and excludes Finder's metadata file;
+# the untracked-file pass below removes every other local-only source artifact.
+rsync -a --exclude='.DS_Store' --exclude='._*' "$ROOT_DIR/src/" "$RUNTIME_DIR/src/"
+# Release artifacts must not absorb local screenshots, scratch files, or other
+# untracked material merely because it sits below src/. Tracked files are copied
+# from the working tree above, so edits to existing runtime sources are retained.
+if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  while IFS= read -r -d '' untracked_path; do
+    relative_path="${untracked_path#src/}"
+    if [[ "$relative_path" != "$untracked_path" ]]; then
+      rm -f -- "$RUNTIME_DIR/src/$relative_path"
+    fi
+  done < <(git -C "$ROOT_DIR" ls-files --others -z -- src)
+fi
 ditto "$ROOT_DIR/gui/dist" "$RUNTIME_DIR/gui/dist"
 ditto "$ROOT_DIR/node_modules" "$RUNTIME_DIR/node_modules"
 ditto "$ROOT_DIR/bin" "$RUNTIME_DIR/bin-launcher"

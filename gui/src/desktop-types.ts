@@ -35,6 +35,8 @@ export interface DesktopSkillLocation {
 }
 
 export interface DesktopOverviewResponse {
+  activityVersion?: 2;
+  activityScope?: "all-local-threads";
   counts: {
     threads: number;
     activeThreads: number;
@@ -46,6 +48,16 @@ export interface DesktopOverviewResponse {
     threadCount: number;
     since: number;
   };
+  activity365d?: Array<{
+    date: string;
+    threadCount: number;
+    totalTokens: number;
+  }>;
+  activity30d?: Array<{
+    date: string;
+    threadCount: number;
+    totalTokens: number;
+  }>;
   recentThreads: DesktopThreadSummary[];
   recentSkills: DesktopSkillSummary[];
 }
@@ -56,6 +68,8 @@ export interface DesktopDiagnosticsResponse {
   checks: {
     runtime: boolean;
     codexHome: boolean;
+    configFile: boolean;
+    authentication: boolean;
     stateDatabase: boolean;
     processEnumeration: boolean;
     skillsDirectory: boolean;

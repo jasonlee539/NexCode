@@ -19,6 +19,7 @@ import {
   readdirSync,
   renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
   type Dirent,
 } from "node:fs";
@@ -27,6 +28,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { pathToFileURL } from "node:url";
 import { zstdDecompressSync } from "node:zlib";
 import { Database, constants as sqliteConstants } from "bun:sqlite";
+import { getConfigDir } from "../../config";
 import { resolveCodexHomeDir } from "../../codex/home";
 import { resolveCodexStateDbPath } from "../../codex/paths";
 import {
@@ -45,15 +47,21 @@ const MAX_SKILL_BYTES = 512 * 1024;
 const SKILL_FILE = "SKILL.md";
 const SKILL_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const THIRTY_DAY_WINDOW_DAYS = 30;
+const YEAR_ACTIVITY_WINDOW_DAYS = 365;
 const MAX_USAGE_ROLLOUT_BYTES = 256 * 1024 * 1024;
 const MAX_USAGE_JSONL_LINE_BYTES = 32 * 1024 * 1024;
 
 export interface DesktopRoutesDeps {
   codexHome?: () => string;
+  configDir?: () => string;
   userHome?: () => string;
   stateDbPath?: () => string;
   listCodexProcesses?: () => CodexWriterProcessCheck;
   signalProcess?: (pid: number, signal: NodeJS.Signals) => unknown;
+  syncCodex?: (port: number | undefined) => Promise<{ ok: boolean; status: string }>;
+  activeCatalogBackupPath?: () => string | null;
+  inspectResponseStateTemps?: () => { eligible: number; eligibleBytes: number };
+  reclaimResponseStateTemps?: () => { removed: number; bytesRemoved: number; failed: number };
   settleDelayMs?: number;
   now?: () => number;
 }
@@ -78,6 +86,17 @@ interface RawThreadRow {
   preview: unknown;
   name: unknown;
   is_pinned: unknown;
+}
+
+type MaintenanceCleanupCategory = "authBackups" | "catalogBackups" | "snapshotResidues";
+
+interface MaintenanceCleanupCandidate {
+  path: string;
+  category: MaintenanceCleanupCategory;
+  bytes: number;
+  device: number;
+  inode: number;
+  modifiedAt: number;
 }
 
 export interface DesktopThreadSummary {
@@ -285,13 +304,33 @@ function safeCodexRolloutPath(rawPath: string, codexHome: string): string | null
 
 type DesktopUsageRange = "1d" | "3d" | "7d" | "30d";
 
-interface LocalTokenEvent {
-  timestamp: number;
+interface LocalTokenUsage {
   inputTokens: number;
   cachedInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;
   totalTokens: number;
+}
+
+interface LocalTokenEvent extends LocalTokenUsage {
+  timestamp: number;
+}
+
+interface LocalTokenSnapshot {
+  timestamp: number;
+  last: LocalTokenUsage;
+  cumulative: LocalTokenUsage | null;
+}
+
+interface LocalRolloutScan {
+  tokenSnapshots: LocalTokenSnapshot[];
+  userActivityTimestamps: number[];
+  fallbackActivityTimestamps: number[];
+}
+
+interface LocalRolloutAnalytics {
+  tokenEvents: LocalTokenEvent[];
+  activityTimestamps: number[];
 }
 
 interface LocalUsageTotals {
@@ -318,12 +357,12 @@ interface RolloutTokenCacheEntry {
   inode: number;
   size: number;
   modifiedAt: number;
-  events: LocalTokenEvent[];
+  scan: LocalRolloutScan;
   trailing: string;
 }
 
 const rolloutTokenCache = new Map<string, RolloutTokenCacheEntry>();
-const rolloutTokenInflight = new Map<string, Promise<LocalTokenEvent[] | null>>();
+const rolloutTokenInflight = new Map<string, Promise<LocalRolloutAnalytics | null>>();
 
 const USAGE_RANGE_DAYS: Record<DesktopUsageRange, number> = {
   "1d": 1,
@@ -368,34 +407,94 @@ function addLocalTokenEvent(target: LocalUsageTotals, event: LocalTokenEvent): v
   target.turns += 1;
 }
 
-function parseLocalTokenEvent(line: string): LocalTokenEvent | null {
-  if (!line.includes("token_count")) return null;
-  let parsed: unknown;
-  try { parsed = JSON.parse(line); } catch { return null; }
-  if (!parsed || typeof parsed !== "object") return null;
-  const root = parsed as { timestamp?: unknown; type?: unknown; payload?: unknown };
-  if (root.type !== "event_msg" || !root.payload || typeof root.payload !== "object") return null;
-  const payload = root.payload as { type?: unknown; info?: unknown };
-  if (payload.type !== "token_count" || !payload.info || typeof payload.info !== "object") return null;
-  const info = payload.info as { last_token_usage?: unknown };
-  if (!info.last_token_usage || typeof info.last_token_usage !== "object") return null;
-  const usage = info.last_token_usage as Record<string, unknown>;
-  const timestamp = normalizeTimestamp(root.timestamp);
-  if (timestamp === null) return null;
+function readLocalTokenUsage(value: unknown): LocalTokenUsage | null {
+  if (!value || typeof value !== "object") return null;
+  const usage = value as Record<string, unknown>;
   const inputTokens = numericValue(usage.input_tokens);
   const cachedInputTokens = numericValue(usage.cached_input_tokens);
   const outputTokens = numericValue(usage.output_tokens);
   const reasoningOutputTokens = numericValue(usage.reasoning_output_tokens);
   const totalTokens = numericValue(usage.total_tokens) || inputTokens + outputTokens;
   if (totalTokens <= 0) return null;
+  return { inputTokens, cachedInputTokens, outputTokens, reasoningOutputTokens, totalTokens };
+}
+
+function emptyLocalRolloutScan(): LocalRolloutScan {
+  return { tokenSnapshots: [], userActivityTimestamps: [], fallbackActivityTimestamps: [] };
+}
+
+function parseLocalRolloutLine(line: string): {
+  tokenSnapshot?: LocalTokenSnapshot;
+  userActivityTimestamp?: number;
+  fallbackActivityTimestamp?: number;
+} | null {
+  if (!line.includes("token_count") && !line.includes("user_message") && !line.includes("\"user\"")) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(line); } catch { return null; }
+  if (!parsed || typeof parsed !== "object") return null;
+  const root = parsed as { timestamp?: unknown; type?: unknown; payload?: unknown };
+  const timestamp = normalizeTimestamp(root.timestamp);
+  if (timestamp === null || !root.payload || typeof root.payload !== "object") return null;
+  const payload = root.payload as { type?: unknown; role?: unknown; info?: unknown };
+
+  if (root.type === "event_msg" && payload.type === "user_message") {
+    return { userActivityTimestamp: timestamp };
+  }
+  if (root.type === "response_item" && payload.type === "message" && payload.role === "user") {
+    return { fallbackActivityTimestamp: timestamp };
+  }
+  if (root.type !== "event_msg" || payload.type !== "token_count" || !payload.info || typeof payload.info !== "object") return null;
+  const info = payload.info as { last_token_usage?: unknown; total_token_usage?: unknown };
+  const last = readLocalTokenUsage(info.last_token_usage);
+  if (!last) return null;
+  return { tokenSnapshot: { timestamp, last, cumulative: readLocalTokenUsage(info.total_token_usage) } };
+}
+
+function collectLocalRolloutLine(scan: LocalRolloutScan, line: string): void {
+  const parsed = parseLocalRolloutLine(line);
+  if (!parsed) return;
+  if (parsed.tokenSnapshot) scan.tokenSnapshots.push(parsed.tokenSnapshot);
+  if (parsed.userActivityTimestamp !== undefined) scan.userActivityTimestamps.push(parsed.userActivityTimestamp);
+  if (parsed.fallbackActivityTimestamp !== undefined) scan.fallbackActivityTimestamps.push(parsed.fallbackActivityTimestamp);
+}
+
+function localTokenUsageDelta(current: LocalTokenUsage, previous: LocalTokenUsage): LocalTokenUsage {
   return {
-    timestamp,
-    inputTokens,
-    cachedInputTokens,
-    outputTokens,
-    reasoningOutputTokens,
-    totalTokens,
+    inputTokens: Math.max(0, current.inputTokens - previous.inputTokens),
+    cachedInputTokens: Math.max(0, current.cachedInputTokens - previous.cachedInputTokens),
+    outputTokens: Math.max(0, current.outputTokens - previous.outputTokens),
+    reasoningOutputTokens: Math.max(0, current.reasoningOutputTokens - previous.reasoningOutputTokens),
+    totalTokens: Math.max(0, current.totalTokens - previous.totalTokens),
   };
+}
+
+function normalizeLocalTokenSnapshots(snapshots: LocalTokenSnapshot[]): LocalTokenEvent[] {
+  const events: LocalTokenEvent[] = [];
+  let previousCumulative: LocalTokenUsage | null = null;
+  let previousLastSignature = "";
+  for (const snapshot of snapshots) {
+    let usage: LocalTokenUsage;
+    if (snapshot.cumulative) {
+      if (previousCumulative && snapshot.cumulative.totalTokens >= previousCumulative.totalTokens) {
+        usage = localTokenUsageDelta(snapshot.cumulative, previousCumulative);
+      } else if (previousCumulative) {
+        // A context reset starts a fresh cumulative sequence. Attribute only this
+        // completed request instead of replaying the new cumulative total.
+        usage = snapshot.last;
+      } else {
+        usage = snapshot.cumulative;
+      }
+      previousCumulative = snapshot.cumulative;
+    } else {
+      const signature = JSON.stringify(snapshot.last);
+      if (signature === previousLastSignature) continue;
+      previousLastSignature = signature;
+      usage = snapshot.last;
+    }
+    if (usage.totalTokens <= 0) continue;
+    events.push({ timestamp: snapshot.timestamp, ...usage });
+  }
+  return events;
 }
 
 async function scanPlainRolloutTokenEvents(
@@ -403,8 +502,8 @@ async function scanPlainRolloutTokenEvents(
   start: number,
   end: number,
   prefix: string,
-): Promise<{ events: LocalTokenEvent[]; trailing: string }> {
-  const events: LocalTokenEvent[] = [];
+): Promise<{ scan: LocalRolloutScan; trailing: string }> {
+  const scan = emptyLocalRolloutScan();
   const decoder = new TextDecoder();
   let pending = prefix;
   let droppingOversizedLine = false;
@@ -422,8 +521,7 @@ async function scanPlainRolloutTokenEvents(
     while (newline >= 0) {
       const line = pending.slice(0, newline).replace(/\r$/, "");
       pending = pending.slice(newline + 1);
-      const event = parseLocalTokenEvent(line);
-      if (event) events.push(event);
+      collectLocalRolloutLine(scan, line);
       newline = pending.indexOf("\n");
     }
     if (Buffer.byteLength(pending, "utf8") > MAX_USAGE_JSONL_LINE_BYTES) {
@@ -438,17 +536,16 @@ async function scanPlainRolloutTokenEvents(
     append(decoder.decode());
   }
   if (!droppingOversizedLine && pending) {
-    const finalEvent = parseLocalTokenEvent(pending.replace(/\r$/, ""));
-    if (finalEvent) {
-      events.push(finalEvent);
+    const finalLine = pending.replace(/\r$/, "");
+    if (parseLocalRolloutLine(finalLine)) {
+      collectLocalRolloutLine(scan, finalLine);
       pending = "";
     }
   }
-  return { events, trailing: droppingOversizedLine ? "" : pending };
+  return { scan, trailing: droppingOversizedLine ? "" : pending };
 }
 
-async function scanRolloutTokenEventsUncached(path: string): Promise<LocalTokenEvent[] | null> {
-  if (path.endsWith(".zst")) return null;
+async function scanRolloutTokenEventsUncached(path: string): Promise<LocalRolloutScan | null> {
   let stat: ReturnType<typeof statSync>;
   try { stat = statSync(path); } catch { return null; }
   if (!stat.isFile() || stat.size > MAX_USAGE_ROLLOUT_BYTES) return null;
@@ -458,7 +555,30 @@ async function scanRolloutTokenEventsUncached(path: string): Promise<LocalTokenE
     && previous.inode === stat.ino
     && previous.size === stat.size
     && previous.modifiedAt === stat.mtimeMs) {
-    return previous.events;
+    return previous.scan;
+  }
+
+  if (path.endsWith(".zst")) {
+    try {
+      const decoded = zstdDecompressSync(readFileSync(path) as Uint8Array<ArrayBuffer>, {
+        maxOutputLength: MAX_USAGE_ROLLOUT_BYTES,
+      });
+      const scan = emptyLocalRolloutScan();
+      for (const line of Buffer.from(decoded).toString("utf8").split(/\r?\n/)) {
+        if (Buffer.byteLength(line, "utf8") <= MAX_USAGE_JSONL_LINE_BYTES) collectLocalRolloutLine(scan, line);
+      }
+      rolloutTokenCache.set(path, {
+        device: stat.dev,
+        inode: stat.ino,
+        size: stat.size,
+        modifiedAt: stat.mtimeMs,
+        scan,
+        trailing: "",
+      });
+      return scan;
+    } catch {
+      return previous?.scan ?? null;
+    }
   }
 
   const canAppend = Boolean(previous
@@ -466,29 +586,41 @@ async function scanRolloutTokenEventsUncached(path: string): Promise<LocalTokenE
     && previous.inode === stat.ino
     && stat.size > previous.size);
   const start = canAppend ? previous!.size : 0;
-  const baseEvents = canAppend ? previous!.events : [];
+  const baseScan = canAppend ? previous!.scan : emptyLocalRolloutScan();
   const prefix = canAppend ? previous!.trailing : "";
   try {
     const scanned = await scanPlainRolloutTokenEvents(path, start, stat.size - 1, prefix);
-    const events = [...baseEvents, ...scanned.events];
+    const scan = {
+      tokenSnapshots: [...baseScan.tokenSnapshots, ...scanned.scan.tokenSnapshots],
+      userActivityTimestamps: [...baseScan.userActivityTimestamps, ...scanned.scan.userActivityTimestamps],
+      fallbackActivityTimestamps: [...baseScan.fallbackActivityTimestamps, ...scanned.scan.fallbackActivityTimestamps],
+    };
     rolloutTokenCache.set(path, {
       device: stat.dev,
       inode: stat.ino,
       size: stat.size,
       modifiedAt: stat.mtimeMs,
-      events,
+      scan,
       trailing: scanned.trailing,
     });
-    return events;
+    return scan;
   } catch {
-    return previous?.events ?? null;
+    return previous?.scan ?? null;
   }
 }
 
-async function scanRolloutTokenEvents(path: string): Promise<LocalTokenEvent[] | null> {
+async function scanRolloutTokenEvents(path: string): Promise<LocalRolloutAnalytics | null> {
   const existing = rolloutTokenInflight.get(path);
   if (existing) return existing;
-  const task = scanRolloutTokenEventsUncached(path).finally(() => {
+  const task = scanRolloutTokenEventsUncached(path).then(scan => scan ? {
+    tokenEvents: normalizeLocalTokenSnapshots(scan.tokenSnapshots),
+    // event_msg:user_message is the canonical human-prompt event. Older rollouts
+    // may expose only response_item:message:user, so use that shape strictly as a
+    // fallback rather than mixing system-injected user-role items into activity.
+    activityTimestamps: scan.userActivityTimestamps.length > 0
+      ? scan.userActivityTimestamps
+      : scan.fallbackActivityTimestamps,
+  } : null).finally(() => {
     if (rolloutTokenInflight.get(path) === task) rolloutTokenInflight.delete(path);
   });
   rolloutTokenInflight.set(path, task);
@@ -499,6 +631,7 @@ async function localTokenAnalytics(
   records: DesktopThreadRecord[],
   codexHome: string,
   now: number,
+  activityWindowDays = THIRTY_DAY_WINDOW_DAYS,
 ) {
   const rangeKeys = Object.keys(USAGE_RANGE_DAYS) as DesktopUsageRange[];
   const starts = Object.fromEntries(
@@ -515,7 +648,8 @@ async function localTokenAnalytics(
   ) as Record<DesktopUsageRange, Map<string, LocalUsageThread>>;
   const days = new Map<string, LocalUsageTotals>();
   const dayThreadIds = new Map<string, Set<string>>();
-  for (let offset = THIRTY_DAY_WINDOW_DAYS - 1; offset >= 0; offset--) {
+  const activityStart = localDayStart(now, activityWindowDays);
+  for (let offset = activityWindowDays - 1; offset >= 0; offset--) {
     const date = new Date(now);
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() - offset);
@@ -529,14 +663,37 @@ async function localTokenAnalytics(
   let skippedThreads = 0;
   for (const record of records) {
     const rollout = safeCodexRolloutPath(record.rolloutPath, codexHome);
-    const events = rollout ? await scanRolloutTokenEvents(rollout) : null;
-    if (events === null) skippedThreads += 1;
+    const rolloutEvents = rollout ? await scanRolloutTokenEvents(rollout) : null;
+    if (rolloutEvents === null) skippedThreads += 1;
     else scannedThreads += 1;
-    const usableEvents = events?.filter(event => event.timestamp >= starts["30d"] && event.timestamp <= now + 60_000) ?? [];
+    const usableEvents = rolloutEvents?.tokenEvents
+      .filter(event => event.timestamp >= activityStart && event.timestamp <= now + 60_000) ?? [];
 
-    if (usableEvents.length === 0 && (!events || events.length === 0) && record.tokensUsed > 0) {
+    // A thread contributes at most once to a given day, regardless of how many
+    // prompts, tool calls, or token snapshots it produced on that day.
+    const rolloutActivityTimestamps = rolloutEvents?.activityTimestamps ?? [];
+    for (const timestamp of rolloutActivityTimestamps) {
+      if (timestamp < activityStart || timestamp > now + 60_000) continue;
+      dayThreadIds.get(localDayKey(timestamp))?.add(record.id);
+    }
+
+    // SQLite remains the final fallback for old or unreadable rollouts. Once a
+    // rollout contains conversation or Token events it is authoritative: an
+    // SQLite updated_at change can also mean pinning/renaming, which is not chat
+    // activity and must not paint an extra square.
+    const recordActivityAt = record.updatedAt ?? record.createdAt;
+    const hasRolloutActivity = Boolean(rolloutEvents
+      && (rolloutActivityTimestamps.length > 0 || rolloutEvents.tokenEvents.length > 0));
+    if (!hasRolloutActivity
+      && recordActivityAt !== null
+      && recordActivityAt >= activityStart
+      && recordActivityAt <= now + 60_000) {
+      dayThreadIds.get(localDayKey(recordActivityAt))?.add(record.id);
+    }
+
+    if (usableEvents.length === 0 && (!rolloutEvents || rolloutEvents.tokenEvents.length === 0) && record.tokensUsed > 0) {
       const activityAt = record.updatedAt ?? record.createdAt;
-      if (activityAt !== null && activityAt >= starts["30d"] && activityAt <= now + 60_000) {
+      if (activityAt !== null && activityAt >= activityStart && activityAt <= now + 60_000) {
         usableEvents.push({
           timestamp: activityAt,
           inputTokens: record.tokensUsed,
@@ -553,7 +710,12 @@ async function localTokenAnalytics(
       const day = days.get(localDayKey(event.timestamp));
       if (day) {
         addLocalTokenEvent(day, event);
-        dayThreadIds.get(localDayKey(event.timestamp))?.add(record.id);
+        // A response can finish after midnight. When prompt timestamps exist,
+        // only those prompts determine the thread's active days; Token events
+        // still contribute to the exact day on which usage was recorded.
+        if (rolloutActivityTimestamps.length === 0) {
+          dayThreadIds.get(localDayKey(event.timestamp))?.add(record.id);
+        }
       }
       for (const range of rangeKeys) {
         if (event.timestamp < starts[range]) continue;
@@ -1013,6 +1175,189 @@ async function forceQuitCodex(deps: DesktopRoutesDeps): Promise<{
   return { ok: surviving === 0 && failed === 0, requested: initial.size, stopped, surviving, failed };
 }
 
+function maintenanceFileCandidate(
+  path: string,
+  category: MaintenanceCleanupCategory,
+): MaintenanceCleanupCandidate | null {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    return {
+      path,
+      category,
+      bytes: stat.size,
+      device: stat.dev,
+      inode: stat.ino,
+      modifiedAt: stat.mtimeMs,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readableJsonObject(path: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function currentAuthStoreSupportsBackupRemoval(path: string): boolean {
+  const store = readableJsonObject(path);
+  if (!store) return false;
+  const accountSets = Object.values(store);
+  return accountSets.length > 0
+    && accountSets.every(value => (
+    value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Array.isArray((value as Record<string, unknown>).accounts)
+    ))
+    && accountSets.some(value => ((value as Record<string, unknown>).accounts as unknown[]).length > 0);
+}
+
+function sameMaintenancePath(left: string, right: string): boolean {
+  const a = resolve(left);
+  const b = resolve(right);
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+function collectMaintenanceCleanupCandidates(
+  nexcodeHome: string,
+  activeCatalogBackupPath: string | null,
+): MaintenanceCleanupCandidate[] {
+  const candidates: MaintenanceCleanupCandidate[] = [];
+  const authPath = join(nexcodeHome, "auth.json");
+  const authBackupPath = `${authPath}.pre-multiauth`;
+  if (currentAuthStoreSupportsBackupRemoval(authPath)) {
+    const candidate = maintenanceFileCandidate(authBackupPath, "authBackups");
+    if (candidate) candidates.push(candidate);
+  }
+
+  let activeCatalogBytes: Buffer | null = null;
+  if (activeCatalogBackupPath) {
+    const active = maintenanceFileCandidate(activeCatalogBackupPath, "catalogBackups");
+    if (active) {
+      try { activeCatalogBytes = readFileSync(active.path); } catch { activeCatalogBytes = null; }
+    }
+  }
+
+  let names: string[] = [];
+  try { names = readdirSync(nexcodeHome); } catch { /* no maintenance store */ }
+  for (const name of names) {
+    const path = join(nexcodeHome, name);
+    if (/^catalog-backup(?:-[a-f0-9]{16})?\.json$/i.test(name)
+      && activeCatalogBackupPath
+      && activeCatalogBytes
+      && !sameMaintenancePath(path, activeCatalogBackupPath)) {
+      const candidate = maintenanceFileCandidate(path, "catalogBackups");
+      if (!candidate) continue;
+      try {
+        if (readFileSync(path).equals(activeCatalogBytes)) candidates.push(candidate);
+      } catch { /* preserve unreadable backups */ }
+      continue;
+    }
+    if (/^codex-history-backup-[a-f0-9]{16}\.json$/i.test(name)) {
+      const manifest = readableJsonObject(path);
+      if (manifest?.version !== 1
+        || !manifest.entries
+        || typeof manifest.entries !== "object"
+        || Array.isArray(manifest.entries)
+        || Object.keys(manifest.entries as Record<string, unknown>).length !== 0) continue;
+      const candidate = maintenanceFileCandidate(path, "catalogBackups");
+      if (candidate) candidates.push(candidate);
+    }
+  }
+  return candidates.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function maintenanceCleanupDigest(
+  candidates: MaintenanceCleanupCandidate[],
+  snapshotResidues: { eligible: number; eligibleBytes: number },
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    candidates: candidates.map(candidate => [
+      candidate.category,
+      candidate.path,
+      candidate.device,
+      candidate.inode,
+      candidate.bytes,
+      candidate.modifiedAt,
+    ]),
+    snapshotResidues: [snapshotResidues.eligible, snapshotResidues.eligibleBytes],
+  })).digest("hex");
+}
+
+function maintenanceCleanupCounts(
+  candidates: MaintenanceCleanupCandidate[],
+  snapshotResidues: { eligible: number },
+): Record<MaintenanceCleanupCategory, number> {
+  const counts = { authBackups: 0, catalogBackups: 0, snapshotResidues: snapshotResidues.eligible };
+  for (const candidate of candidates) counts[candidate.category] += 1;
+  return counts;
+}
+
+function maintenanceCandidateStillMatches(candidate: MaintenanceCleanupCandidate): boolean {
+  try {
+    const current = lstatSync(candidate.path);
+    return current.isFile()
+      && !current.isSymbolicLink()
+      && current.dev === candidate.device
+      && current.ino === candidate.inode
+      && current.size === candidate.bytes
+      && current.mtimeMs === candidate.modifiedAt;
+  } catch {
+    return false;
+  }
+}
+
+function removeMaintenanceCandidates(candidates: MaintenanceCleanupCandidate[]): { count: number; bytes: number } {
+  if (!candidates.every(maintenanceCandidateStillMatches)) throw new Error("stale_preview");
+  let count = 0;
+  let bytes = 0;
+  for (const candidate of candidates) {
+    if (!maintenanceCandidateStillMatches(candidate)) throw new Error("stale_preview");
+    unlinkSync(candidate.path);
+    count += 1;
+    bytes += candidate.bytes;
+  }
+  return { count, bytes };
+}
+
+async function inspectMaintenanceCleanup(nexcodeHome: string, deps: DesktopRoutesDeps) {
+  let activeCatalogBackupPath: string | null = null;
+  if (deps.activeCatalogBackupPath) {
+    try { activeCatalogBackupPath = deps.activeCatalogBackupPath(); } catch { /* uncertain */ }
+  } else {
+    try {
+      const { catalogBackupPathFor, readCodexCatalogPath } = await import("../../codex/catalog/parsing");
+      activeCatalogBackupPath = catalogBackupPathFor(readCodexCatalogPath());
+    } catch { /* preserve every catalog backup when the active target is uncertain */ }
+  }
+  let snapshotResidues: { eligible: number; eligibleBytes: number };
+  if (deps.inspectResponseStateTemps) snapshotResidues = deps.inspectResponseStateTemps();
+  else {
+    const { inspectAbandonedResponseStateTemps } = await import("../../responses/state");
+    snapshotResidues = inspectAbandonedResponseStateTemps();
+  }
+  const candidates = collectMaintenanceCleanupCandidates(nexcodeHome, activeCatalogBackupPath);
+  const counts = maintenanceCleanupCounts(candidates, snapshotResidues);
+  const bytes = candidates.reduce((sum, candidate) => sum + candidate.bytes, 0)
+    + snapshotResidues.eligibleBytes;
+  return {
+    candidates,
+    snapshotResidues,
+    counts,
+    count: counts.authBackups + counts.catalogBackups + counts.snapshotResidues,
+    bytes,
+    digest: maintenanceCleanupDigest(candidates, snapshotResidues),
+  };
+}
+
 function diagnostics(codexHome: string, userHome: string, stateDbPath: string, deps: DesktopRoutesDeps) {
   let homeReadable = false;
   let homeWritable = false;
@@ -1028,10 +1373,35 @@ function diagnostics(codexHome: string, userHome: string, stateDbPath: string, d
     storageBytes = storage.total.bytes;
     storageFiles = storage.total.fileCount;
   } catch { /* reported as zero + failed check below */ }
+  const configPath = join(codexHome, "config.toml");
+  let configFile = !existsSync(configPath);
+  if (!configFile) {
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      Bun.TOML.parse(raw.replace(/^\uFEFF/, ""));
+      configFile = true;
+    } catch { /* malformed or unreadable */ }
+  }
+  const authPath = join(codexHome, "auth.json");
+  const authentication = !existsSync(authPath) || readableJsonObject(authPath) !== null;
+  let stateDatabase = !existsSync(stateDbPath);
+  let diagnosticDb: Database | undefined;
+  if (!stateDatabase) {
+    try {
+      const stat = lstatSync(stateDbPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("unsafe_database");
+      diagnosticDb = new Database(stateDbPath, { readonly: true });
+      diagnosticDb.query("SELECT name FROM sqlite_schema LIMIT 1").get();
+      stateDatabase = true;
+    } catch { /* malformed or unreadable */ }
+    finally { try { diagnosticDb?.close(); } catch { /* read-only probe */ } }
+  }
   const checks = {
     runtime: true,
     codexHome: homeReadable && homeWritable,
-    stateDatabase: existsSync(stateDbPath),
+    configFile,
+    authentication,
+    stateDatabase,
     processEnumeration: processCheck.state === "ok",
     skillsDirectory: existsSync(join(codexHome, "skills")),
   };
@@ -1202,8 +1572,10 @@ export async function handleDesktopRoutes(ctx: ManagementContext): Promise<Respo
   if (url.pathname === "/api/desktop/overview" && req.method === "GET") {
     const threads = readThreadRecords(stateDbPath);
     const skills = listSkills(codexHome, userHome, stateDbPath);
-    const usage = await localTokenAnalytics(threads, codexHome, now());
+    const usage = await localTokenAnalytics(threads, codexHome, now(), YEAR_ACTIVITY_WINDOW_DAYS);
     return jsonResponse({
+      activityVersion: 2,
+      activityScope: "all-local-threads",
       counts: {
         threads: threads.length,
         activeThreads: threads.filter(thread => !thread.archived).length,
@@ -1214,6 +1586,16 @@ export async function handleDesktopRoutes(ctx: ManagementContext): Promise<Respo
         ...usage.ranges["30d"],
         since: localDayStart(usage.generatedAt, THIRTY_DAY_WINDOW_DAYS),
       },
+      activity365d: usage.days.map(day => ({
+        date: day.date,
+        threadCount: day.threadCount,
+        totalTokens: day.totalTokens,
+      })),
+      activity30d: usage.days.slice(-THIRTY_DAY_WINDOW_DAYS).map(day => ({
+        date: day.date,
+        threadCount: day.threadCount,
+        totalTokens: day.totalTokens,
+      })),
       recentThreads: threads.slice(0, 5).map(publicThread),
       recentSkills: skills.slice(0, 5),
     }, 200, req, config);
@@ -1226,6 +1608,99 @@ export async function handleDesktopRoutes(ctx: ManagementContext): Promise<Respo
 
   if (url.pathname === "/api/desktop/diagnostics" && req.method === "GET") {
     return jsonResponse(diagnostics(codexHome, userHome, stateDbPath, deps), 200, req, config);
+  }
+
+  if (url.pathname === "/api/desktop/maintenance/repair" && req.method === "POST") {
+    const repaired: string[] = [];
+    const warnings: string[] = [];
+    try {
+      mkdirSync(join(codexHome, "skills"), { recursive: true, mode: 0o700 });
+      repaired.push("local-directories");
+    } catch {
+      warnings.push("local-directories");
+    }
+    try {
+      const { runStartupInstallAction } = await import("../startup-action-control");
+      await (ctx.deps.runStartupInstallAction ?? runStartupInstallAction)("install-shim", { repair: true });
+      repaired.push("launcher");
+    } catch {
+      warnings.push("launcher");
+    }
+    try {
+      const { readRuntimePort, loadConfig } = await import("../../config");
+      const runtime = (ctx.deps.readRuntimePort ?? readRuntimePort)(process.pid);
+      const syncCodex = deps.syncCodex ?? (async (port: number | undefined) => {
+        const { syncModelsToCodex } = await import("../../codex/sync");
+        return syncModelsToCodex(port, loadConfig(), null);
+      });
+      const catalog = await syncCodex(runtime?.port);
+      if (catalog.status === "refused" || (!catalog.ok && catalog.status !== "skipped")) warnings.push("catalog");
+      else repaired.push("catalog");
+    } catch {
+      warnings.push("catalog");
+    }
+    try {
+      const [{ clearThreadAccountMap }, { clearProviderQuotaCache }] = await Promise.all([
+        import("../../codex/routing"),
+        import("../../providers/quota"),
+      ]);
+      (ctx.deps.clearThreadAccountMap ?? clearThreadAccountMap)();
+      (ctx.deps.clearProviderQuotaCache ?? clearProviderQuotaCache)();
+      repaired.push("runtime-state");
+    } catch {
+      warnings.push("runtime-state");
+    }
+    const after = diagnostics(codexHome, userHome, stateDbPath, deps);
+    if (!after.ok) warnings.push("diagnostics");
+    return jsonResponse({
+      ok: warnings.length === 0,
+      repaired,
+      warnings: [...new Set(warnings)],
+      diagnostics: after,
+    }, 200, req, config);
+  }
+
+  if (url.pathname === "/api/desktop/maintenance/cleanup/preview"
+    && (req.method === "GET" || req.method === "POST")) {
+    const preview = await inspectMaintenanceCleanup((deps.configDir ?? getConfigDir)(), deps);
+    return jsonResponse({
+      count: preview.count,
+      bytes: preview.bytes,
+      digest: preview.digest,
+      categories: preview.counts,
+    }, 200, req, config);
+  }
+
+  if (url.pathname === "/api/desktop/maintenance/cleanup" && req.method === "POST") {
+    let body: { digest?: unknown };
+    try { body = await readManagementJsonBody(req); } catch (error) {
+      rethrowManagementBodyTooLarge(error);
+      return jsonResponse({ error: "invalid_json" }, 400, req, config);
+    }
+    const digest = typeof body.digest === "string" ? body.digest : "";
+    const preview = await inspectMaintenanceCleanup((deps.configDir ?? getConfigDir)(), deps);
+    if (!digest || digest !== preview.digest) {
+      return jsonResponse({ error: "stale_preview" }, 409, req, config);
+    }
+    try {
+      const files = removeMaintenanceCandidates(preview.candidates);
+      const snapshots = deps.reclaimResponseStateTemps
+        ? deps.reclaimResponseStateTemps()
+        : (await import("../../responses/state")).reclaimAbandonedResponseStateTemps();
+      return jsonResponse({
+        ok: snapshots.failed === 0,
+        count: files.count + snapshots.removed,
+        bytes: files.bytes + snapshots.bytesRemoved,
+        categories: {
+          ...maintenanceCleanupCounts(preview.candidates, { eligible: snapshots.removed }),
+          snapshotResidues: snapshots.removed,
+        },
+        warnings: snapshots.failed > 0 ? ["snapshot-residues"] : [],
+      }, 200, req, config);
+    } catch (error) {
+      const stale = error instanceof Error && error.message === "stale_preview";
+      return jsonResponse({ error: stale ? "stale_preview" : "cleanup_failed" }, stale ? 409 : 500, req, config);
+    }
   }
 
   if (url.pathname === "/api/desktop/codex/force-quit" && req.method === "POST") {

@@ -6,32 +6,99 @@ import { IconActivity, IconHardDrive, IconPower, IconRefresh } from "../icons";
 import { useI18n } from "../i18n/shared";
 
 interface CleanupPreview {
-  percent: number;
   count: number;
   bytes: number;
   digest: string;
+  categories: {
+    authBackups: number;
+    catalogBackups: number;
+    snapshotResidues: number;
+  };
+}
+
+interface RepairResponse {
+  ok: boolean;
+  repaired: string[];
+  warnings: string[];
+  diagnostics: DesktopDiagnosticsResponse;
+}
+
+interface RepairStep {
+  id: string;
+  ok: boolean;
 }
 
 type MaintenanceAction = "diagnostics" | "cleanup" | "forceQuit" | "restart";
+
+class MaintenanceHttpError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+
+  constructor(status: number, code: string | null) {
+    super([status, code].filter(value => value !== null).join(":"));
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function requireMaintenanceResponse(response: Response): Promise<void> {
+  if (response.ok) return;
+  const payload = await response.json().catch(() => null) as { error?: unknown } | null;
+  const rawCode = payload?.error;
+  const code = typeof rawCode === "string"
+    ? rawCode
+    : rawCode && typeof rawCode === "object" && "code" in rawCode
+      ? String((rawCode as { code?: unknown }).code ?? "") || null
+      : null;
+  throw new MaintenanceHttpError(response.status, code);
+}
 
 export default function Maintenance({ apiBase }: { apiBase: string }) {
   const { locale, t } = useI18n();
   const [busy, setBusy] = useState<MaintenanceAction | null>(null);
   const [diagnostics, setDiagnostics] = useState<DesktopDiagnosticsResponse | null>(null);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
+  const [repairSteps, setRepairSteps] = useState<RepairStep[]>([]);
   const [feedback, setFeedback] = useState<{ tone: "ok" | "warn" | "err"; text: string } | null>(null);
 
   const runDiagnostics = async () => {
     setBusy("diagnostics");
     setFeedback(null);
+    setRepairSteps([]);
     try {
-      const response = await fetch(`${apiBase}/api/desktop/diagnostics`);
-      if (!response.ok) throw new Error();
-      const result = await response.json() as DesktopDiagnosticsResponse;
-      setDiagnostics(result);
-      setFeedback({ tone: result.ok ? "ok" : "warn", text: t(result.ok ? "maintenance.diagnosticsPassed" : "maintenance.diagnosticsWarning") });
-    } catch {
-      setFeedback({ tone: "err", text: t("maintenance.actionFailed") });
+      const initialResponse = await fetch(`${apiBase}/api/desktop/diagnostics`, { cache: "no-store" });
+      if (initialResponse.ok) setDiagnostics(await initialResponse.json() as DesktopDiagnosticsResponse);
+      const response = await fetch(`${apiBase}/api/desktop/maintenance/repair`, { method: "POST" });
+      await requireMaintenanceResponse(response);
+      const result = await response.json() as RepairResponse;
+      setDiagnostics(result.diagnostics);
+      const restart = await requestCodexRestart(apiBase, {
+        formatFailure: () => t("maintenance.restartFailed"),
+        formatUnreachable: () => t("maintenance.restartFailed"),
+        formatMalformed: () => t("maintenance.restartFailed"),
+        formatTimeout: () => t("maintenance.restartTimeout"),
+      });
+      const restartHealthy = Boolean(restart.ok
+        && restart.result
+        && restart.result.code !== "enumeration_unavailable"
+        && restart.result.code !== "partially_stopped");
+      setRepairSteps([
+        ...result.repaired.map(id => ({ id, ok: true })),
+        ...result.warnings.map(id => ({ id, ok: false })),
+        { id: "codex-restart", ok: restartHealthy },
+      ]);
+      const repairedCount = result.repaired.length + (restartHealthy ? 1 : 0);
+      setFeedback({
+        tone: result.ok && restartHealthy ? "ok" : "warn",
+        text: t(result.ok && restartHealthy ? "maintenance.repairDone" : "maintenance.repairPartial", { count: String(repairedCount) }),
+      });
+    } catch (error) {
+      const detail = error instanceof MaintenanceHttpError
+        ? error.status === 404
+          ? t("maintenance.backendOutdated")
+          : `${t("maintenance.actionFailed")} HTTP ${error.status}${error.code ? ` · ${error.code}` : ""}`
+        : t("maintenance.actionFailed");
+      setFeedback({ tone: "err", text: detail });
     } finally {
       setBusy(null);
     }
@@ -41,20 +108,23 @@ export default function Maintenance({ apiBase }: { apiBase: string }) {
     setBusy("cleanup");
     setFeedback(null);
     try {
-      const response = await fetch(`${apiBase}/api/storage/cleanup/preview`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ percent: 25 }),
+      const response = await fetch(`${apiBase}/api/desktop/maintenance/cleanup/preview`, {
+        cache: "no-store",
       });
-      if (!response.ok) throw new Error();
+      await requireMaintenanceResponse(response);
       const result = await response.json() as CleanupPreview;
       if (result.count === 0) {
         setFeedback({ tone: "ok", text: t("maintenance.nothingToClean") });
       } else {
         setPreview(result);
       }
-    } catch {
-      setFeedback({ tone: "err", text: t("maintenance.cleanupPreviewFailed") });
+    } catch (error) {
+      const detail = error instanceof MaintenanceHttpError
+        ? error.status === 404
+          ? t("maintenance.backendOutdated")
+          : `${t("maintenance.cleanupPreviewFailed")} HTTP ${error.status}${error.code ? ` · ${error.code}` : ""}`
+        : t("maintenance.cleanupPreviewFailed");
+      setFeedback({ tone: "err", text: detail });
     } finally {
       setBusy(null);
     }
@@ -65,12 +135,10 @@ export default function Maintenance({ apiBase }: { apiBase: string }) {
     setBusy("cleanup");
     setFeedback(null);
     try {
-      const response = await fetch(`${apiBase}/api/storage/cleanup`, {
+      const response = await fetch(`${apiBase}/api/desktop/maintenance/cleanup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          percent: preview.percent,
-          mode: "quarantine",
           digest: preview.digest,
         }),
       });
@@ -185,10 +253,20 @@ export default function Maintenance({ apiBase }: { apiBase: string }) {
   const diagnosticChecks = diagnostics ? [
     ["runtime", t("maintenance.checkRuntime"), diagnostics.checks.runtime],
     ["home", t("maintenance.checkCodexHome"), diagnostics.checks.codexHome],
+    ["config", t("maintenance.checkConfig"), diagnostics.checks.configFile],
+    ["auth", t("maintenance.checkAuthentication"), diagnostics.checks.authentication],
     ["database", t("maintenance.checkDatabase"), diagnostics.checks.stateDatabase],
     ["process", t("maintenance.checkProcesses"), diagnostics.checks.processEnumeration],
     ["skills", t("maintenance.checkSkills"), diagnostics.checks.skillsDirectory],
   ] as const : [];
+  const repairStepLabels: Record<string, string> = {
+    "local-directories": t("maintenance.repairDirectories"),
+    launcher: t("maintenance.repairLauncher"),
+    catalog: t("maintenance.repairCatalog"),
+    "runtime-state": t("maintenance.repairRuntimeState"),
+    diagnostics: t("maintenance.repairRecheck"),
+    "codex-restart": t("maintenance.repairRestart"),
+  };
 
   return (
     <div className="desktop-maintenance-page">
@@ -200,6 +278,18 @@ export default function Maintenance({ apiBase }: { apiBase: string }) {
       </div>
 
       {feedback && <div className={`desktop-inline-status is-${feedback.tone}`} role="status">{feedback.text}</div>}
+
+      {repairSteps.length > 0 && (
+        <section className="desktop-repair-steps" aria-label={t("maintenance.repairSteps")}>
+          {repairSteps.map((step, index) => (
+            <div key={`${step.id}-${index}`} className={step.ok ? "is-ok" : "is-warn"}>
+              <span className={`dot ${step.ok ? "dot-green" : "dot-amber"}`} />
+              <span>{repairStepLabels[step.id] ?? step.id}</span>
+              <strong>{t(step.ok ? "maintenance.passed" : "maintenance.failed")}</strong>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="desktop-maintenance-grid">
         {cards.map(card => (
@@ -241,6 +331,11 @@ export default function Maintenance({ apiBase }: { apiBase: string }) {
           <div className="modal-card desktop-cleanup-dialog" onClick={event => event.stopPropagation()}>
             <h3 id="desktop-cleanup-title">{t("maintenance.cleanupConfirmTitle")}</h3>
             <p>{t("maintenance.cleanupConfirmBody", { count: String(preview.count), size: formatBytes(preview.bytes, locale) })}</p>
+            <div className="desktop-cleanup-breakdown">
+              <span>{t("maintenance.cleanupAuthBackups")}<strong>{preview.categories.authBackups}</strong></span>
+              <span>{t("maintenance.cleanupCatalogBackups")}<strong>{preview.categories.catalogBackups}</strong></span>
+              <span>{t("maintenance.cleanupSnapshots")}<strong>{preview.categories.snapshotResidues}</strong></span>
+            </div>
             <div className="desktop-cleanup-safety">{t("maintenance.cleanupSafety")}</div>
             <div className="dialog-actions">
               <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setPreview(null)}>{t("common.cancel")}</button>

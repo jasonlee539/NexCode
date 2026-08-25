@@ -70,7 +70,7 @@ function fixture() {
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run("thread-1", rollout, 1_700_000_000, 1_700_000_100, "cli", "/work/demo", "Desktop thread", 1234, 0, "gpt-5", "high", "Build the feature", 1);
   db.close();
-  return { codexHome, stateDbPath };
+  return { codexHome, stateDbPath, rollout };
 }
 
 const config = { port: 10100, providers: {} } as NxcConfig;
@@ -79,13 +79,14 @@ async function requestDesktop(
   path: string,
   options: RequestInit,
   desktopRoutes: DesktopRoutesDeps,
+  managementDeps: ManagementContext["deps"] = {},
 ): Promise<Response> {
   const req = new Request(`http://localhost${path}`, options);
   const ctx: ManagementContext = {
     req,
     url: new URL(req.url),
     config,
-    deps: { desktopRoutes },
+    deps: { ...managementDeps, desktopRoutes },
     convergeCodexCatalog: async () => ({
       status: "unchanged",
       reason: "unchanged",
@@ -135,11 +136,219 @@ describe("desktop management routes", () => {
     const response = await requestDesktop("/api/desktop/overview", {}, deps);
     expect(response.status).toBe(200);
     const payload = await response.json() as {
+      activityVersion: number;
+      activityScope: string;
       localTokenUsage30d: { totalTokens: number; threadCount: number; since: number };
+      activity365d: Array<{ date: string; threadCount: number; totalTokens: number }>;
+      activity30d: Array<{ date: string; threadCount: number; totalTokens: number }>;
     };
+    expect(payload.activityVersion).toBe(2);
+    expect(payload.activityScope).toBe("all-local-threads");
     expect(payload.localTokenUsage30d.totalTokens).toBe(1234);
     expect(payload.localTokenUsage30d.threadCount).toBe(1);
     expect(payload.localTokenUsage30d.since).toBeLessThanOrEqual(1_700_000_100_000);
+    expect(payload.activity365d).toHaveLength(365);
+    expect(payload.activity365d.at(-1)).toMatchObject({ threadCount: 1, totalTokens: 1_234 });
+    expect(payload.activity30d).toHaveLength(30);
+    expect(payload.activity30d.at(-1)).toMatchObject({ threadCount: 1, totalTokens: 1_234 });
+  });
+
+  test("aggregates every local thread, deduplicates Token snapshots, and counts prompted thread-days", async () => {
+    const fx = fixture();
+    const firstDay = new Date(2026, 7, 24, 10, 0, 0).getTime();
+    const secondDay = new Date(2026, 7, 25, 10, 0, 0).getTime();
+    const thirdDay = new Date(2026, 7, 26, 10, 0, 0).getTime();
+    const usage = (total: number) => ({
+      input_tokens: total,
+      cached_input_tokens: 0,
+      output_tokens: 0,
+      reasoning_output_tokens: 0,
+      total_tokens: total,
+    });
+    writeFileSync(fx.rollout, [
+      JSON.stringify({
+        timestamp: new Date(firstDay).toISOString(),
+        type: "event_msg",
+        payload: { type: "user_message", message: "first prompt" },
+      }),
+      JSON.stringify({
+        timestamp: new Date(firstDay + 60_000).toISOString(),
+        type: "response_item",
+        payload: { type: "message", role: "user", content: [{ type: "input_text", text: "first prompt" }] },
+      }),
+      JSON.stringify({
+        timestamp: new Date(firstDay + 120_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "user_message", message: "second prompt in the same thread" },
+      }),
+      JSON.stringify({
+        timestamp: new Date(firstDay + 180_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "token_count", info: { last_token_usage: usage(100), total_token_usage: usage(100) } },
+      }),
+      JSON.stringify({
+        timestamp: new Date(firstDay + 240_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "token_count", info: { last_token_usage: usage(100), total_token_usage: usage(100) } },
+      }),
+      JSON.stringify({
+        timestamp: new Date(secondDay).toISOString(),
+        type: "event_msg",
+        payload: { type: "user_message", message: "continued on the next day" },
+      }),
+      JSON.stringify({
+        timestamp: new Date(secondDay + 60_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "token_count", info: { last_token_usage: usage(150), total_token_usage: usage(250) } },
+      }),
+      JSON.stringify({
+        timestamp: new Date(thirdDay).toISOString(),
+        type: "event_msg",
+        payload: { type: "token_count", info: { last_token_usage: usage(50), total_token_usage: usage(300) } },
+      }),
+    ].join("\n"));
+    const secondRollout = join(fx.codexHome, "sessions", "thread-2.jsonl");
+    writeFileSync(secondRollout, [
+      JSON.stringify({
+        timestamp: new Date(firstDay + 300_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "user_message", message: "another local thread" },
+      }),
+      JSON.stringify({
+        timestamp: new Date(firstDay + 360_000).toISOString(),
+        type: "event_msg",
+        payload: { type: "token_count", info: { last_token_usage: usage(40), total_token_usage: usage(40) } },
+      }),
+    ].join("\n"));
+    const sqliteOnlyDay = firstDay - 86_400_000;
+    const db = new Database(fx.stateDbPath);
+    db.query("UPDATE threads SET updated_at = ? WHERE id = ?")
+      .run(Math.trunc(sqliteOnlyDay / 1_000), "thread-1");
+    db.query(`INSERT INTO threads (
+      id, rollout_path, created_at, updated_at, source, cwd, title,
+      tokens_used, archived, model, reasoning_effort, preview, is_pinned
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      "thread-2",
+      secondRollout,
+      Math.trunc(firstDay / 1_000),
+      Math.trunc(firstDay / 1_000),
+      "cli",
+      "/work/second",
+      "Second local thread",
+      40,
+      0,
+      "gpt-5",
+      "high",
+      "another local thread",
+      0,
+    );
+    db.close();
+
+    const deps = {
+      codexHome: () => fx.codexHome,
+      userHome: () => fx.codexHome,
+      stateDbPath: () => fx.stateDbPath,
+      now: () => thirdDay + 3_600_000,
+    };
+    const response = await requestDesktop("/api/desktop/overview", {}, deps);
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      localTokenUsage30d: { totalTokens: number; threadCount: number };
+      activity365d: Array<{ date: string; threadCount: number; totalTokens: number }>;
+    };
+    const firstKey = new Date(firstDay).toLocaleDateString("sv-SE");
+    const secondKey = new Date(secondDay).toLocaleDateString("sv-SE");
+    const thirdKey = new Date(thirdDay).toLocaleDateString("sv-SE");
+    const sqliteOnlyKey = new Date(sqliteOnlyDay).toLocaleDateString("sv-SE");
+    expect(payload.localTokenUsage30d).toMatchObject({ totalTokens: 340, threadCount: 2 });
+    expect(payload.activity365d.find(day => day.date === firstKey)).toMatchObject({
+      threadCount: 2,
+      totalTokens: 140,
+    });
+    expect(payload.activity365d.find(day => day.date === secondKey)).toMatchObject({
+      threadCount: 1,
+      totalTokens: 150,
+    });
+    expect(payload.activity365d.find(day => day.date === thirdKey)).toMatchObject({
+      threadCount: 0,
+      totalTokens: 50,
+    });
+    expect(payload.activity365d.find(day => day.date === sqliteOnlyKey)).toMatchObject({
+      threadCount: 0,
+      totalTokens: 0,
+    });
+  });
+
+  test("one-click maintenance repairs managed state and treats absent optional Codex files as healthy", async () => {
+    const fx = fixture();
+    const syncedPorts: Array<number | undefined> = [];
+    const deps: DesktopRoutesDeps = {
+      codexHome: () => fx.codexHome,
+      configDir: () => fx.codexHome,
+      userHome: () => fx.codexHome,
+      stateDbPath: () => fx.stateDbPath,
+      listCodexProcesses: () => ({ state: "ok", processes: [] }),
+      syncCodex: async port => {
+        syncedPorts.push(port);
+        return { ok: true, status: "written" };
+      },
+    };
+    const response = await requestDesktop("/api/desktop/maintenance/repair", { method: "POST" }, deps, {
+      readRuntimePort: () => null,
+      runStartupInstallAction: async () => ({ message: "shim repaired" }),
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as {
+      ok: boolean;
+      repaired: string[];
+      warnings: string[];
+      diagnostics: { ok: boolean; checks: Record<string, boolean> };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.repaired).toEqual(["local-directories", "launcher", "catalog", "runtime-state"]);
+    expect(payload.warnings).toEqual([]);
+    expect(payload.diagnostics.ok).toBe(true);
+    expect(payload.diagnostics.checks).toMatchObject({ configFile: true, authentication: true, stateDatabase: true });
+    expect(syncedPorts).toEqual([undefined]);
+  });
+
+  test("maintenance cleanup previews and removes only verified redundant backup and snapshot entries", async () => {
+    const fx = fixture();
+    const authPath = join(fx.codexHome, "auth.json");
+    const authBackup = `${authPath}.pre-multiauth`;
+    const historyBackup = join(fx.codexHome, "codex-history-backup-0123456789abcdef.json");
+    writeFileSync(authPath, JSON.stringify({ demo: { activeAccountId: "one", accounts: [{ id: "one" }] } }));
+    writeFileSync(authBackup, "legacy-auth-backup");
+    writeFileSync(historyBackup, JSON.stringify({ version: 1, entries: {} }));
+    const deps: DesktopRoutesDeps = {
+      codexHome: () => fx.codexHome,
+      configDir: () => fx.codexHome,
+      userHome: () => fx.codexHome,
+      stateDbPath: () => fx.stateDbPath,
+      activeCatalogBackupPath: () => null,
+      inspectResponseStateTemps: () => ({ eligible: 1, eligibleBytes: 9 }),
+      reclaimResponseStateTemps: () => ({ removed: 1, bytesRemoved: 9, failed: 0 }),
+    };
+    const previewResponse = await requestDesktop("/api/desktop/maintenance/cleanup/preview", {}, deps);
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as {
+      count: number;
+      digest: string;
+      categories: { authBackups: number; catalogBackups: number; snapshotResidues: number };
+    };
+    expect(preview.count).toBe(3);
+    expect(preview.categories).toEqual({ authBackups: 1, catalogBackups: 1, snapshotResidues: 1 });
+
+    const cleanup = await requestDesktop("/api/desktop/maintenance/cleanup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ digest: preview.digest }),
+    }, deps);
+    expect(cleanup.status).toBe(200);
+    expect(await cleanup.json()).toMatchObject({ ok: true, count: 3 });
+    expect(existsSync(authPath)).toBe(true);
+    expect(existsSync(authBackup)).toBe(false);
+    expect(existsSync(historyBackup)).toBe(false);
   });
 
   test("builds 1, 3, 7 and 30 day Token analytics from local rollout events", async () => {

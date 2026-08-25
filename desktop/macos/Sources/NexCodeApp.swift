@@ -17,10 +17,6 @@ private final class WindowDragRegionView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
-        if event.clickCount == 2 {
-            window.zoom(nil)
-            return
-        }
         window.performDrag(with: event)
     }
 }
@@ -41,10 +37,14 @@ private final class RuntimeController {
     private var stopping = false
     private var logTail = ""
 
-    var hasManagedProcess: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return process?.isRunning == true
+    private func bundledRuntimeURLs() -> (root: URL, bun: URL, cli: URL)? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let root = resources.appendingPathComponent("runtime", isDirectory: true)
+        let bun = root.appendingPathComponent("bin/bun")
+        let cli = root.appendingPathComponent("src/cli/index.ts")
+        guard FileManager.default.isExecutableFile(atPath: bun.path),
+              FileManager.default.fileExists(atPath: cli.path) else { return nil }
+        return (root, bun, cli)
     }
 
     func start() {
@@ -61,29 +61,21 @@ private final class RuntimeController {
                 return
             }
 
-            guard let resources = Bundle.main.resourceURL else {
-                self.deliverFailure("应用资源目录不可用。")
-                return
-            }
-            let runtimeRoot = resources.appendingPathComponent("runtime", isDirectory: true)
-            let bunURL = runtimeRoot.appendingPathComponent("bin/bun")
-            let cliURL = runtimeRoot.appendingPathComponent("src/cli/index.ts")
-            guard FileManager.default.isExecutableFile(atPath: bunURL.path),
-                  FileManager.default.fileExists(atPath: cliURL.path) else {
+            guard let bundled = self.bundledRuntimeURLs() else {
                 self.deliverFailure("NexCode 运行时不完整，请重新构建应用。")
                 return
             }
 
             let child = Process()
-            child.executableURL = bunURL
-            child.arguments = [cliURL.path, "start"]
-            child.currentDirectoryURL = runtimeRoot
+            child.executableURL = bundled.bun
+            child.arguments = [bundled.cli.path, "start"]
+            child.currentDirectoryURL = bundled.root
             child.standardInput = FileHandle.nullDevice
 
             var environment = self.desktopRuntimeEnvironment()
             environment["NEXCODE_DESKTOP_APP"] = "1"
             environment["NXC_BUN_RUNTIME_SOURCE"] = "bundled"
-            environment["NXC_BUN_RUNTIME_PATH"] = bunURL.path
+            environment["NXC_BUN_RUNTIME_PATH"] = bundled.bun.path
             environment["PATH"] = self.desktopPath(environment["PATH"])
             child.environment = environment
 
@@ -150,13 +142,43 @@ private final class RuntimeController {
         let child = process
         lock.unlock()
 
-        guard let child, child.isRunning else {
-            DispatchQueue.main.async(execute: completion)
-            return
-        }
-
-        child.terminate()
         workQueue.async {
+            // Always run the identity-checked CLI stop path. The desktop shell may
+            // have attached to an already-running NexCode process instead of owning
+            // `child`; only `nxc stop` also handles that process, its service manager,
+            // runtime records, and native Codex restoration.
+            if let bundled = self.bundledRuntimeURLs() {
+                let stopper = Process()
+                stopper.executableURL = bundled.bun
+                stopper.arguments = [bundled.cli.path, "stop"]
+                stopper.currentDirectoryURL = bundled.root
+                stopper.standardInput = FileHandle.nullDevice
+                stopper.standardOutput = FileHandle.nullDevice
+                stopper.standardError = FileHandle.nullDevice
+                var environment = self.desktopRuntimeEnvironment()
+                environment["NEXCODE_DESKTOP_APP"] = "1"
+                environment["NXC_BUN_RUNTIME_SOURCE"] = "bundled"
+                environment["NXC_BUN_RUNTIME_PATH"] = bundled.bun.path
+                environment["PATH"] = self.desktopPath(environment["PATH"])
+                stopper.environment = environment
+                do {
+                    try stopper.run()
+                    let stopDeadline = Date().addingTimeInterval(25)
+                    while stopper.isRunning && Date() < stopDeadline {
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
+                    if stopper.isRunning { stopper.terminate() }
+                } catch {
+                    // The managed child fallback below still guarantees that the
+                    // app-owned process does not survive a packaging/runtime error.
+                }
+            }
+
+            guard let child, child.isRunning else {
+                DispatchQueue.main.async(execute: completion)
+                return
+            }
+            child.terminate()
             let deadline = Date().addingTimeInterval(12)
             while child.isRunning && Date() < deadline {
                 Thread.sleep(forTimeInterval: 0.1)
@@ -422,8 +444,8 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
         webView = WKWebView(frame: .zero, configuration: configuration)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 940, height: 630),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 1215, height: 735),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -482,11 +504,12 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-        window.minSize = NSSize(width: 820, height: 560)
+        let fixedContentSize = NSSize(width: 1215, height: 735)
+        window.contentMinSize = fixedContentSize
+        window.contentMaxSize = fixedContentSize
+        window.setContentSize(fixedContentSize)
+        window.standardWindowButton(.zoomButton)?.isEnabled = false
         window.center()
-        // v6 adopts the balanced 1.5:1 workspace used by the focused dashboard,
-        // then keeps the user's resized desktop window on later launches.
-        window.setFrameAutosaveName("NexCode.MainWindow.v6")
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -755,9 +778,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtime = RuntimeController()
     private let appWindow = AppWindowController()
     private var waitingForTermination = false
+    private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
+        configureStatusItem()
         NSApp.activate(ignoringOtherApps: true)
         appWindow.showWindow(nil)
         appWindow.showLoading()
@@ -767,7 +792,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         runtime.start()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         appWindow.showWindow(nil)
@@ -784,7 +809,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard runtime.hasManagedProcess else { return .terminateNow }
         if waitingForTermination { return .terminateLater }
         waitingForTermination = true
         appWindow.showLoading(stopping: true)
@@ -793,6 +817,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func reloadDashboard() { appWindow.reloadDashboard() }
+
+    @objc private func showFromStatusItem() {
+        NSApp.activate(ignoringOtherApps: true)
+        appWindow.showWindow(nil)
+        appWindow.window?.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func quitCompletely() {
+        NSApp.terminate(nil)
+    }
 
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
@@ -850,10 +884,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "窗口")
         windowItem.submenu = windowMenu
         windowMenu.addItem(NSMenuItem(title: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
-        windowMenu.addItem(NSMenuItem(title: "缩放", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""))
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = menu
+    }
+
+    private func configureStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let image = NSImage(systemSymbolName: "network", accessibilityDescription: "NexCode")
+            ?? NSImage(named: NSImage.applicationIconName)
+        image?.isTemplate = true
+        image?.size = NSSize(width: 17, height: 17)
+        item.button?.image = image
+        item.button?.toolTip = "NexCode"
+
+        let menu = NSMenu(title: "NexCode")
+        let show = NSMenuItem(title: "显示 NexCode", action: #selector(showFromStatusItem), keyEquivalent: "")
+        show.target = self
+        menu.addItem(show)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "完全退出 NexCode", action: #selector(quitCompletely), keyEquivalent: "q")
+        quit.target = self
+        menu.addItem(quit)
+        item.menu = menu
+        statusItem = item
     }
 }
 
