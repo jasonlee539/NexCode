@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "authority": "CL-03 live manifest authority",
+  "sourceCommit": "4f746d13799888ea0a8c7a111aa2ad61c2126ea0",
+  "assertionDslVersion": "1.0.0",
+  "evidenceSchemaVersion": "1.0.0",
+  "failureRuleSets": {
+    "live-v1-default": [
+      { "id": "contract-integrity", "match": ["fixture_digest_mismatch", "manifest_digest_mismatch", "fixture_decode_failure", "harness_failure", "sanitizer_failure"], "classification": "harness_failure", "secondaryCode": "contract_integrity", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "auth-blocked", "match": ["auth_blocked", "authentication_blocked"], "classification": "authentication_blocked", "secondaryCode": "auth_blocked", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "quota-blocked", "match": ["quota_blocked"], "classification": "quota_blocked", "secondaryCode": "quota_blocked", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "network-blocked", "match": ["network_blocked", "network_failure"], "classification": "network_failure", "secondaryCode": "network_blocked", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "region-blocked", "match": ["region_blocked"], "classification": "region_blocked", "secondaryCode": "region_blocked", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "transient-blocked", "match": ["provider_transient"], "classification": "provider_transient", "secondaryCode": "provider_transient", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "time-limit", "match": ["connect_timeout", "first_byte_timeout", "inactivity_timeout", "total_timeout"], "classification": "timeout", "secondaryCode": "scenario_time_limit", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "resource-limit", "match": ["request_limit", "input_byte_limit", "output_byte_limit", "output_token_limit", "tool_call_limit", "artifact_byte_limit"], "classification": "budget_exhausted", "secondaryCode": "scenario_resource_limit", "verdictEffect": "none", "retry": "never", "expected": false },
+      { "id": "required-assertion", "match": ["required_assertion_failed"], "classification": "protocol_failure", "secondaryCode": "deterministic_assertion", "verdictEffect": "degraded", "retry": "never", "expected": false },
+      { "id": "fallback", "match": ["no_prior_rule"], "classification": "inconclusive", "secondaryCode": "unclassified", "verdictEffect": "none", "retry": "never", "expected": false }
+    ]
+  },
+  "expectedFailureRuleTemplate": {
+    "id": "expected-failure-exact-match",
+    "match": ["expected_failure_exact_match"],
+    "retry": "never",
+    "expected": true
+  },
+  "manifestDefaults": {
+    "version": "1.0.0",
+    "suiteVersion": "1.0.0",
+    "evidenceLayer": "live_route_compatibility",
+    "verificationRole": "required",
+    "executionMode": "live",
+    "freshness": { "maxAgeMs": 604800000 },
+    "executionLimits": {
+      "totalTimeoutMs": 120000,
+      "connectTimeoutMs": 10000,
+      "firstByteTimeoutMs": 30000,
+      "inactivityTimeoutMs": 30000,
+      "maxRequests": 16,
+      "maxInputBytes": 8388608,
+      "maxOutputBytes": 16777216,
+      "maxOutputTokens": 32768,
+      "maxToolCalls": 32,
+      "maxMemoryBytes": 536870912,
+      "maxChildProcesses": 0,
+      "maxArtifacts": 16,
+      "perArtifactBytes": 262144,
+      "aggregateArtifactBytes": 1048576
+    },
+    "artifactPolicy": {
+      "allowed": ["assertion_report", "sanitized_request_shape", "sanitized_response_shape", "normalized_event_trace", "sanitized_error"],
+      "perArtifactBytes": 262144,
+      "aggregateBytes": 1048576,
+      "retention": "local_contract",
+      "publicVisibility": "deny",
+      "redactionProfile": "synthetic_live_v1"
+    },
+    "failureRuleSet": "live-v1-default"
+  },
+  "cases": [
+    {
+      "id": "responses-core.live.basic-turn",
+      "suite": "responses-core",
+      "capability": "protocol.responses.core",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": [], "requiredHarnessFeatures": ["live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "rsp-live-basic-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":false}", "digest": "30008ff4c36b0800b9c319c479faba05a595032284ade84e24a3c3bbe2ca9d33" },
+      "fixture": { "id": "rsp-live-basic-upstream", "role": "upstream_response", "mediaType": "application/json", "bytesUtf8": "{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}", "digest": "8fecf8cce5ea948916b56ad82f2bc5326f7af9e207dce34a0b3451cd931fab35" },
+      "assertions": [
+        { "id": "status", "operator": "http_status_equals", "selector": "/client/response/status", "expected": 200, "required": true },
+        { "id": "text", "operator": "normalized_text_equals", "selector": "/client/response/normalizedText", "expected": "OK", "required": true },
+        { "id": "terminal", "operator": "terminal_signal_equals", "selector": "/client/response/terminal", "expected": "completed", "required": true }
+      ]
+    },
+    {
+      "id": "chat-core.live.basic-turn",
+      "suite": "chat-core",
+      "capability": "protocol.chat.core",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-chat"], "surfaces": ["responses-sse"], "requiredClaims": [], "requiredHarnessFeatures": ["live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "chat-live-basic-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":true}", "digest": "08ee0c134024187c6c8dde8ad4727454d2cf76a2d88cde4188fbda2a1700f110" },
+      "fixture": { "id": "chat-live-basic-upstream", "role": "upstream_response", "mediaType": "text/event-stream", "bytesUtf8": "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"OK\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", "digest": "05bed2244d8b954bc0db594bb78c8e60ce6fb7f4fe71abbe12931e86607939d3" },
+      "assertions": [
+        { "id": "text", "operator": "normalized_text_equals", "selector": "/client/response/normalizedText", "expected": "OK", "required": true },
+        { "id": "terminal", "operator": "terminal_signal_equals", "selector": "/client/response/terminal", "expected": "completed", "required": true }
+      ]
+    },
+    {
+      "id": "anthropic-core.live.basic-turn",
+      "suite": "anthropic-core",
+      "capability": "protocol.anthropic.messages.core",
+      "requirements": { "inboundProtocols": ["anthropic-messages"], "upstreamProtocols": ["openai-responses"], "surfaces": ["anthropic-sse"], "requiredClaims": [], "requiredHarnessFeatures": ["live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "anthropic-live-basic-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"messages\":[{\"role\":\"user\",\"content\":\"PING\"}],\"max_tokens\":32,\"stream\":true}", "digest": "c3c0ddb5097a878ca9676b3624fb16b531804421681c9c92574d36345fdb4557" },
+      "fixture": { "id": "anthropic-live-basic-upstream", "role": "upstream_response", "mediaType": "text/event-stream", "bytesUtf8": "data:{\"type\":\"response.output_text.delta\",\"delta\":\"OK\"}\n\ndata:{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_fixture\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", "digest": "751ed32d0c2d351dddc2c685308ab70553843a42f3623968a43b6fceecfd7b38" },
+      "assertions": [
+        { "id": "terminal", "operator": "terminal_signal_equals", "selector": "/client/response/terminal", "expected": "message_stop", "required": true }
+      ]
+    },
+    {
+      "id": "tools-core.live.function-round-trip",
+      "suite": "tools-core",
+      "capability": "tools.round_trip",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["tools"], "requiredHarnessFeatures": ["inert_tools", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "tools-live-fn-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":false,\"tools\":[{\"type\":\"function\",\"name\":\"lookup\",\"parameters\":{\"type\":\"object\",\"properties\":{\"q\":{\"type\":\"string\"}},\"required\":[\"q\"]}}],\"tool_choice\":{\"type\":\"function\",\"name\":\"lookup\"}}", "digest": "b007415f9970b80b448a12e09daf1a4006fe54cd9a64c14a6ac31322ca17d858" },
+      "fixture": { "id": "tools-live-fn-upstream", "role": "upstream_response", "mediaType": "application/json", "bytesUtf8": "{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"id\":\"call_fixture\",\"type\":\"function_call\",\"call_id\":\"call_fixture\",\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}]}", "digest": "36137e4ebe6d2d1bde19f177aac88655150f181e97400dc200aa3cc9e6049977" },
+      "assertions": [
+        { "id": "call", "operator": "tool_call_equals", "selector": "/client/response/toolCalls/0", "expected": {"id":"call_fixture","name":"lookup","arguments":{"q":"x"},"kind":"function","ordinal":0}, "required": true }
+      ]
+    },
+    {
+      "id": "tools-core.live.custom-freeform-round-trip",
+      "suite": "tools-core",
+      "capability": "tools.round_trip",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["tools"], "requiredHarnessFeatures": ["inert_tools", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "tools-live-custom-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":false,\"tools\":[{\"type\":\"custom\",\"name\":\"apply_patch\",\"description\":\"patch\"}],\"tool_choice\":{\"type\":\"custom\",\"name\":\"apply_patch\"}}", "digest": "bea357c5f8ce3ac63d3b949a0bcd7dd533544836dc0fb6f5d6006438cbf79ca9" },
+      "fixture": { "id": "tools-live-custom-upstream", "role": "upstream_response", "mediaType": "application/json", "bytesUtf8": "{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"id\":\"call_fixture\",\"type\":\"custom_tool_call\",\"call_id\":\"call_fixture\",\"name\":\"apply_patch\",\"input\":\"*** Begin Patch\\n*** End Patch\"}]}", "digest": "df171bb727317d2ff6a18b40cb0315cf9c6139a38b2779c34ae6d64db44f3532" },
+      "assertions": [
+        { "id": "call", "operator": "tool_call_equals", "selector": "/client/response/toolCalls/0", "expected": {"id":"call_fixture","name":"apply_patch","arguments":"*** Begin Patch\n*** End Patch","kind":"custom","ordinal":0}, "required": true }
+      ]
+    },
+    {
+      "id": "codex-core.live.tool-turn",
+      "suite": "codex-core",
+      "capability": "client.codex.core",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-chat"], "surfaces": ["responses-sse"], "requiredClaims": ["tools"], "requiredHarnessFeatures": ["inert_tools", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "codex-live-tool-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":true}", "digest": "08ee0c134024187c6c8dde8ad4727454d2cf76a2d88cde4188fbda2a1700f110" },
+      "fixture": { "id": "codex-live-tool-upstream", "role": "upstream_response", "mediaType": "text/event-stream", "bytesUtf8": "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_fixture\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", "digest": "e3af2b8e1e909bf10f8517dd6904f20cb2840b930412bd2b45c68eb66d2d427e" },
+      "assertions": [
+        { "id": "call", "operator": "tool_call_equals", "selector": "/client/response/toolCalls/0", "expected": {"id":"call_fixture","name":"lookup","arguments":{"q":"x"},"kind":"function","ordinal":0}, "required": true },
+        { "id": "terminal", "operator": "terminal_signal_equals", "selector": "/client/response/terminal", "expected": "completed", "required": true }
+      ]
+    },
+    {
+      "id": "codex-core.live.custom-tool-turn",
+      "suite": "codex-core",
+      "capability": "client.codex.core",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["tools"], "requiredHarnessFeatures": ["inert_tools", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "codex-live-custom-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":\"PING\",\"stream\":false,\"tools\":[{\"type\":\"custom\",\"name\":\"apply_patch\"}],\"tool_choice\":{\"type\":\"custom\",\"name\":\"apply_patch\"}}", "digest": "ae657a4d635cbaddf425ebdb1c7727ad8d713f9d8ae2b23b8d09d03a628e3a22" },
+      "fixture": { "id": "codex-live-custom-upstream", "role": "upstream_response", "mediaType": "application/json", "bytesUtf8": "{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"id\":\"call_fixture\",\"type\":\"custom_tool_call\",\"call_id\":\"call_fixture\",\"name\":\"apply_patch\",\"input\":\"PATCH\"}]}", "digest": "5e69ba37cd2253072fd60144779306f43fe6d35493593b9d132161576a94ec85" },
+      "assertions": [
+        { "id": "call", "operator": "tool_call_equals", "selector": "/client/response/toolCalls/0", "expected": {"id":"call_fixture","name":"apply_patch","arguments":"PATCH","kind":"custom","ordinal":0}, "required": true }
+      ]
+    },
+    {
+      "id": "vision-core.live.synthetic-ocr",
+      "suite": "vision-core",
+      "capability": "modalities.image.input",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["image"], "requiredHarnessFeatures": ["synthetic_image", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "initiatingRequest": { "id": "vision-live-ocr-request", "role": "client_request", "mediaType": "application/json", "bytesUtf8": "{\"model\":\"fixture-model\",\"input\":[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"OCR-NONCE-42\"},{\"type\":\"input_image\",\"image_url\":\"data:image/png;base64,iVBORw0KGgo=\",\"detail\":\"high\"}]}],\"stream\":false}", "digest": "99db28fc78c6a9b921c15dadc3cd7c1ba536540cfdbcadf633e30f8bb72b1752" },
+      "fixture": { "id": "vision-live-ocr-upstream", "role": "upstream_response", "mediaType": "application/json", "bytesUtf8": "{\"id\":\"resp_fixture\",\"status\":\"completed\",\"output\":[{\"id\":\"msg_fixture\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"{\\\"nonce\\\":\\\"OCR-NONCE-42\\\"}\"}]}]}", "digest": "2b50fc06c782d243d0dbc81d2ed42484055f03fa030eeb9c35ebd793d8c51a5e" },
+      "assertions": [
+        { "id": "nonce", "operator": "json_path_equals", "selector": "/client/response/json/output/0/content/0/text", "expected": "{\"nonce\":\"OCR-NONCE-42\"}", "required": true }
+      ]
+    },
+    {
+      "id": "reasoning-core.live.replay",
+      "suite": "reasoning-core",
+      "capability": "reasoning.round_trip",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["reasoning"], "requiredHarnessFeatures": ["adapter_vector", "reasoning_replay", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "fixture": { "id": "reasoning-live-replay-vector", "role": "adapter_vector", "mediaType": "application/vnd.nexcode.adapter-vector+json", "bytesUtf8": "{\"turn1\":{\"reasoning\":{\"id\":\"rs_fixture\",\"text\":\"PLAN\",\"signature\":\"sig_fixture\"},\"toolCall\":{\"callId\":\"call_fixture\"}},\"turn2\":{\"toolResult\":{\"callId\":\"call_fixture\",\"output\":\"RESULT\"}}}", "digest": "4db7eb0b5dad2036af5d521110c4bf12a4663af4f467ce1d51b23db4c9e27fef" },
+      "assertions": [
+        { "id": "signature", "operator": "json_path_equals", "selector": "/upstream/requests/1/json/input/0/signature", "expected": "sig_fixture", "required": true },
+        { "id": "private-absent", "operator": "json_path_absent", "selector": "/client/response/json/reasoning", "expected": true, "required": true }
+      ]
+    },
+    {
+      "id": "mcp-core.live.synthetic-tool",
+      "suite": "mcp-core",
+      "capability": "tools.mcp.core",
+      "requirements": { "inboundProtocols": ["openai-responses"], "upstreamProtocols": ["openai-responses"], "surfaces": ["responses-http"], "requiredClaims": ["tools"], "requiredHarnessFeatures": ["in_memory_mcp_stub", "mcp_call_result_v1", "mcp_lab_stub", "live_transport"], "platforms": [], "routePreconditions": ["lab_run_approval"] },
+      "fixture": { "id": "mcp-live-stub", "role": "synthetic_tool", "mediaType": "application/vnd.nexcode.mcp-stub+json", "bytesUtf8": "{\"namespace\":\"mcp__fixture\",\"name\":\"lookup\",\"arguments\":{\"q\":\"x\"},\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ECHO\"}],\"isError\":false}}", "digest": "c8a8cf41060dae6cfda1b6102cf06993ce062a1b674a0f87bd8d2e264aa90dda" },
+      "assertions": [
+        { "id": "result", "operator": "json_path_equals", "selector": "/client/response/json", "expected": {"content":[{"type":"text","text":"ECHO"}],"isError":false}, "required": true }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+---
+title: CLI エージェント、ルーティング、および統合
+description: マルチエージェント、コンボ、可観測性、アクセス、統合、システム、および構成コマンド。
+---
+
+これらのコマンドは、エージェントのポリシーとルーティングを制御し、稼働中のプロキシを検査し、サポートされているクライアントを nexcode に接続します。
+
+## エージェントポリシー
+
+### `nxc agent <status|injection|effort|subagents|fallback|sidecar> ...`
+
+ヘッドレス マルチエージェントロスター、エフォート キャップ、プロンプト インジェクション、フォールバック、サイドカー設定を管理します。現在のポリシーには `status` を使用します。サーフェス モード、委任、エフォート、およびフォールバック動作がどのように組み合わされるかについては、[サブエージェントサーフェス](/guides/sub-agent-surface/) を参照してください。
+
+```bash
+nxc agent subagents set ark/model-a,openai/gpt-5.5
+```
+
+### `nxc v2 <status|on|off|mode <v1|default|v2>|threads <n>>`
+
+Codex `multi_agent_v2` 機能フラグとスリーステート マルチエージェント サーフェス モードを管理します。
+
+|サブコマンド |アクション |
+| --- | --- |
+| `status` (デフォルト) |現在の v2 フラグ、マルチエージェント モード、およびスレッドの同時実行性をレポートします。 |
+| `on` | `multi_agent_v2` 機能を有効にし、カタログを再同期します。 |
+| `off` | `multi_agent_v2` 機能を無効にし、カタログを再同期します。 |
+| `mode v1` |すべてのモデルを強制的に v1 にし、ネイティブ v2 を無効にして、アクティブなスレッド制限を保持します。 |
+| `mode default` |上流のモデル サーフェス ピンを尊重します。 |
+| `mode v2` |すべてのモデルを強制的に v2 にし、ネイティブ v2 を有効にして、アクティブなスレッド制限を維持します。 |
+| `threads <n>` |アクティブな v1/v2 スレッド制限を少なくとも 1 の整数に設定します。
+
+```bash
+nxc v2 status
+nxc v2 mode v1
+nxc v2 mode default
+nxc v2 on
+nxc v2 threads 16
+```
+
+`mode` サブコマンドは、`multiAgentMode` を nexcode 設定に書き込み、Codex カタログを再同期します。モードとフラグの遷移により、現在の数値スレッド制限が有効な v1/v2 Codex キー間で移動します。移行が失敗すると、元の `config.toml` が復元されます。変更は新しい Codex セッションに適用されますが、実行中のセッションでは固定されたサーフェスが維持されます。
+
+## コンボルーティング
+
+### `nxc combo <list|show|set|remove> ...`・`nxc route combo ...`
+
+コンボフェイルオーバーとラウンドロビン仮想モデルを管理します。 `nxc route combo` は階層別名です。 combo は現在サポートされているルーティング リソースです。ターゲットは`provider/model[:weight],provider/model[:weight]`を使用します。
+
+```bash
+nxc combo list
+nxc route combo set reliable --targets ark/model-a:2,openai/gpt-5.5
+```
+
+ルーティングの動作と設定ガイダンスについては、「[コンボ](/guides/combos/)」を参照してください。
+
+## 可観測性とデバッグ
+
+### `nxc observe <logs|usage|storage|memory|debug|claude-inbound|injection> ...`
+
+プロキシ リクエスト、使用状況、ストレージ、メモリ、およびデバッグ データを検査します。直接のエイリアスは次のとおりです。
+
+|別名 |同等のリソース |
+| --- | --- |
+| `nxc logs [filters] [--follow] [--json|--jsonl]` | `nxc observe logs` |
+| `nxc usage [--range <7d|30d|all>] [--surface <all|codex|claude|grok>] [--json]` | `nxc observe usage` |
+| `nxc storage [--json]` | `nxc observe storage` |
+| `nxc memory [--json]` | `nxc observe memory` |
+
+```bash
+nxc observe usage --range 30d --json
+```
+
+### `nxc debug <provider|usage|injection|claude> <on|off|status|reset|logs [-f]>`
+
+実行中のプロキシの管理 API を通じて、ランタイム デバッグ オーバーライドを読み取りまたは変更します。
+
+```bash
+nxc debug provider on|off|status|reset
+nxc debug provider logs [-f|--follow]
+nxc debug usage on|off|status|reset
+nxc debug usage logs [-f|--follow]
+```
+
+スコープがない場合、`nxc debug` は使用状況を出力し、プロキシが停止すると、次回起動環境がデフォルトになります。プロバイダーのデバッグのデフォルトは `NXC_DEBUG=1` です (従来の `NXC_DEBUG_FRAMES=1` も機能します)。使用法デバッグのデフォルトは `NEXCODE_USAGE_DEBUG=1` からです。
+
+## APIアクセス
+
+### `nxc access <key|endpoints|models|test> ...`
+
+NexCode アドミッション API キーを管理し、外部エンドポイントとモデルを検査します。 `nxc api-key <list|create|remove> ...` は `nxc access key` の別名です。
+
+```bash
+nxc access key create deployment
+```
+
+## クライアントの統合
+
+### `nxc integration <claude|grok> ...`
+
+サポートされている Claude と Grok の統合を管理します。以下の直接コマンド ファミリは、クライアント固有のコントロールを公開します。
+
+### `nxc claude [claude args...]`
+
+プロキシが実行されていることを確認し、`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`、`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`、および `config.claudeCode` のモデル スロットを使用してクロード コードを起動します。ルーティングされたモデルは、Claude Code 2.1.129 以降の安定したスロット エイリアスを介してネイティブ `/model` ピッカーに表示されます。古いバージョンでは、`ANTHROPIC_MODEL` または `/model <id>` で選択します。ユーザーがエクスポートした `ANTHROPIC_*` 変数が常に優先されます。
+
+Claude デスクトップ プロファイル コマンドは次のとおりです。
+
+```text
+nxc claude desktop [apply]                         Save and apply the four-family profile
+nxc claude desktop show [--json]                   Show routes, families, and defaults
+nxc claude desktop move <route> <family> [--default]
+nxc claude desktop default <family> <route|none>
+nxc claude desktop export <path|->                 Export versioned JSON (`-` = stdout)
+nxc claude desktop import <path> [--apply]         Validate and import JSON
+```
+
+ファミリは `opus`、`fable`、`sonnet`、および `haiku` です。新しいルートは `opus` で始まります。 `none` は、そのファミリーが空の場合にのみ有効です。従来の適用フラグ `--static`、`--hybrid`、および `--discovery-only` は引き続きサポートされます。クロードコードの設定には`nxc claude config <status|set> ...`を使用してください。
+
+### `nxc opencode [opencode args...]`
+
+プロキシが実行されていることを確認し、OpenCode のインライン ランタイム層 (`OPENCODE_CONFIG_CONTENT`) で生成された `provider.nexcode` ブロックを使用してオープンコードを起動します。既存のインライン設定は保持され、今回の起動では `provider.nexcode` のみが置き換えられます。グローバルまたはプロジェクトの `opencode.json` ファイルは、既存の上書きについて警告するために読み取られることがありますが、ディスク上のファイルは変更されません。ルーティングされたモデルは `nexcode/<provider>/<model>` として表示されます。後でプレーン `opencode` を起動すると、以前とまったく同じように動作します。
+
+### `nxc grok <status|exclude|include|set|clear|apply> ...`
+
+Grok Build モデル フェンスを管理および適用します。
+
+## クライアント設定のエクスポート
+
+### `nxc export --client <opencode|pi|omp|hermes|openclaw|kimi|gajae|dsh|mcode|zcode|prime>`
+
+実行中のプロキシに接続するクライアント設定を出力します。このコマンドは、ベース URL、モデル一覧、およびクライアントに応じた認証情報参照または `nexcode-loopback` プレースホルダーを含む `nexcode` プロバイダーブロックを、選択したクライアントのネイティブ形式でシリアル化します。
+
+プロキシが実行されている必要があります。このコマンドはライブ ポートを解決し、`/api/models` を読み取り、Codex が現在認識できるモデルのみを出力します。
+
+|旗 |アクション |
+| --- | --- |
+| `--client <opencode\|pi\|omp\|hermes\|openclaw\|kimi\|gajae\|dsh\|mcode\|zcode\|prime>` |必須。クライアントの設定形式を選択します。 |
+| `--json` |構成 JSON のみを標準出力に出力するため、リダイレクトはバイト正確な出力をキャプチャします。 `--out` 書き込みメモを含むすべての診断は stderr に送られます。 |
+| `--out <path>` |設定を `<path>` に書き込みます。既存のファイルの置き換えを拒否します。 |
+| `--force` | `--out` が既存のファイルを置き換えることを許可します。 |
+
+```bash
+nxc export --client opencode                     # config plus destination, merge warning, and counts
+nxc export --client pi --json > pi-models.json   # JSON document for a pipe or a diff
+nxc export --client omp --out ./omp-models.yml    # native OMP YAML
+nxc export --client opencode --out ~/nexcode-opencode.json
+```
+
+`--json` がない場合、選択したクライアントのネイティブ形式で生成された設定が先頭に続き、正規の宛先パス、マージ警告、クライアント固有の起動前ガイダンス、およびコンテキスト制限を省略する行数を含むモデル数が続きます (クライアントはこれらに対して独自のデフォルトを適用します)。
+
+|クライアント |正規の宛先 |ダウンロードファイル名 |環境変数 |
+| --- | --- | --- | --- |
+| `opencode` | `~/.config/opencode/opencode.json` (設定すると `XDG_CONFIG_HOME` が勝ち) | `opencode.json` | `NEXCODE_OPENCODE_API_KEY` |
+| `pi` | `~/.pi/agent/models.json` (`PI_CODING_AGENT_DIR` が設定時に優先。相対値は拒否されます) | `pi-models.json` | なし - ブロックにリテラル `nexcode-loopback` が入ります |
+| `omp` | `~/.omp/agent/models.yml` (デフォルト。空の場合も `OMP_PROFILE` が `PI_PROFILE` より優先されます) | `omp-models.yaml` | なし - リテラル `nexcode-loopback` |
+| `hermes` | `~/.hermes/config.yaml` | `hermes-config.yaml` | `NEXCODE_HERMES_API_KEY` |
+| `openclaw` | `~/.openclaw/openclaw.json` | `openclaw.json5` | `NEXCODE_OPENCLAW_API_KEY` |
+| `kimi` | `~/.kimi-code/config.toml` | `kimi-config.toml` | なし - loopback placeholder |
+| `gajae` | `~/.gjc/agent/models.yml` | `gajae-models.yaml` | `NEXCODE_GAJAE_API_KEY` |
+| `dsh` | `$DSH_HOME/settings.yaml`（既定 `~/.dsh/settings.yaml`） | `settings.yaml` | なし — 秘密ではないループバック bearer プレースホルダー |
+| `mcode` | `~/.minimax/config.yaml` (`MINIMAX_DATA_DIR`、次に旧 `MAVIS_DATA_DIR` が設定時に優先。相対値は拒否されます) | `mcode-config.yaml` | なし — loopback placeholder |
+| `zcode` | `~/.zcode/v2/config.json` (`ZCODE_DATA_DIR` が設定時に優先。相対値は拒否されます) | `config.json` | なし — loopback placeholder |
+| `prime` | `~/.prime/agent/models.json` (`PRIME_AGENT_CODING_AGENT_DIR` が設定時に優先。相対値は拒否されます) | `prime-models.json` | なし — loopback placeholder |
+
+opencode は `{env:NEXCODE_OPENCODE_API_KEY}` を補間します。nexcode が生成する Pi のエクスポートには環境変数が不要で、リテラルのプレースホルダー `nexcode-loopback` が入ります。この値は必須です。Pi はモデル リストを構築する際に `apiKey` を解決し、既存の設定に未設定の環境変数参照がある場合はプロバイダー全体を隠すためです。ループバックでは、生成されたプレースホルダーをプロキシが検査することはありません。
+
+:::caution[マージし、決して置き換えないでください]
+`nxc export` は実際のクライアント設定を書き込むことはありません。宛先は手動でマージできるように出力されます。`--out` は、`--force` なしで既存のファイルを上書きすることを拒否します。これは、設定を置き換えると、その中にすでに含まれている他のプロバイダー、エージェント、および MCP エントリが破壊されるためです。
+:::
+
+キーはシリアル化されません。生成される設定には、文書化された環境参照か、秘密ではないループバック用プレースホルダーのいずれかが入ります。ループバック プロキシ (`127.0.0.1`、デフォルト) にはアドミッション キーはまったく必要ありません。プロキシがループバックを超えてバインドする場合は、対応する `NEXCODE_OPENCODE_API_KEY`、`NEXCODE_HERMES_API_KEY`、または `NEXCODE_OPENCLAW_API_KEY` を設定します。`NEXCODE_GAJAE_API_KEY` は Gajae の provider 認証値を環境から渡しますが、remote admission header は送れないため、生成される Gajae 統合はループバック専用のままです。アドミッションキーの発行方法については、[リモートアクセス](/reference/configuration/#remote-access) を参照してください。上流プロバイダー自体のキーは完全に別のものであり、[プロバイダー](/guides/providers/) ごとに構成されます。
+
+同じペイロードが `GET /api/client-config` によって提供され、ダッシュボードの [API] タブにレンダリングされるため、CLI、API、および GUI は同じバイトを使用します。
+
+## ランタイムと構成
+
+### `nxc system <status|settings|startup|diagnostics|sync|update> ...`
+
+ヘッドレス ランタイムの設定、起動、同期、診断、更新を管理します。
+
+```bash
+nxc system settings --stream-mode eager-relay
+```
+
+### `nxc config <show|get|set|unset|validate|export|import> ...`
+
+検証された NexCode 設定を検査し、安全に変更します。 `show` および `get` はシークレットをマスクします。インポートは書き込む前に検証され、`--yes` が必要です。

@@ -1,0 +1,381 @@
+name: Release
+
+# Publish nexcode to npm — jawcode-style: triggered from the Actions tab with an explicit
+# version, dist-tag, and a dry-run-first default. Bump package.json on main BEFORE dispatching
+# (or use `bun run release <version>`, which does the bump+commit+push+dispatch for you); the
+# workflow verifies the version matches before publishing.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish — must equal package.json (e.g. 0.1.0)"
+        required: true
+        type: string
+      tag:
+        description: "npm dist-tag"
+        required: true
+        type: choice
+        options:
+          - latest
+          - preview
+        default: latest
+      dry-run:
+        description: "Dry run (build + pack, no actual publish)"
+        required: false
+        type: boolean
+        default: true
+      expected-sha:
+        description: "Immutable release commit this dispatch must publish (fail if the branch moved)"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  validate-dispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted dispatch guard
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          path: trusted-dispatch
+
+      - name: Validate release dispatch
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          node - <<'NODE'
+          const { validateReleaseDispatch } = require(
+            "./trusted-dispatch/.github/scripts/release-dispatch-guard.cjs",
+          );
+
+          const failure = validateReleaseDispatch({
+            eventName: process.env.GITHUB_EVENT_NAME,
+            ref: process.env.GITHUB_REF,
+            expectedSha: process.env.EXPECTED_SHA,
+            actualSha: process.env.GITHUB_SHA,
+          });
+
+          if (failure) {
+            console.error(`::error::${failure}`);
+            process.exit(1);
+          }
+          NODE
+  publish:
+    needs: validate-dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Verify dispatched SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+        run: |
+          if [ -z "$EXPECTED_SHA" ]; then
+            echo "::error::expected-sha is required; refusing to publish without an audited commit"
+            exit 1
+          elif [ "$GITHUB_SHA" != "$EXPECTED_SHA" ]; then
+            echo "::error::branch moved after the release audit (expected ${EXPECTED_SHA}, got ${GITHUB_SHA}) — refusing to publish an unaudited commit"
+            exit 1
+          fi
+
+      # nexcode is bun-native (the prepublishOnly audit, GUI build, and typecheck run under bun).
+      - name: Setup project Bun
+        uses: ./.github/actions/setup-project-bun
+
+      # node + npm perform the actual publish. registry-url points npm at the public registry.
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1. Node 24 runners already
+      # provide a compatible npm; avoid replacing the bundled npm because global
+      # npm self-updates can lose publish-time dependencies such as sigstore.
+      - name: Verify npm version
+        run: |
+          npm_version="$(npm --version)"
+          echo "npm=${npm_version}"
+          # shellcheck disable=SC2016 # the node script deliberately avoids shell expansion
+          node -e '
+            const [major, minor] = process.argv[1].split(".").map(Number);
+            if (major < 11 || (major === 11 && minor < 5)) {
+              console.error(`npm ${process.argv[1]} is too old for trusted publishing; need >= 11.5.1`);
+              process.exit(1);
+            }
+          ' "$npm_version"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Dependency audit (high severity)
+        run: bun run audit:high
+
+      - name: Verify version matches package.json
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          echo "package.json=$PKG  input=${RELEASE_VERSION}"
+          test "$PKG" = "$RELEASE_VERSION" || {
+            echo "::error::package.json ($PKG) != requested (${RELEASE_VERSION}) — bump package.json on main first";
+            exit 1;
+          }
+
+      # The exact-SHA CI gate includes the hosted Linux, Windows, and macOS
+      # keyring smoke matrix. Do not duplicate its Linux bootstrap here.
+      - name: Require successful Cross-platform CI for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          NPM_DIST_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          case "$GITHUB_REF" in
+            refs/heads/main)
+              expected_tag="latest"
+              if [[ "$RELEASE_VERSION" == *-* ]]; then
+                echo "::error::main releases must use a stable semver version; got ${RELEASE_VERSION}"
+                exit 1
+              fi
+              ;;
+            refs/heads/preview)
+              expected_tag="preview"
+              if [[ "$RELEASE_VERSION" != *-preview.* ]]; then
+                echo "::error::preview releases must use a preview prerelease version; got ${RELEASE_VERSION}"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Release must run from main or preview; got ${GITHUB_REF}"
+              exit 1
+              ;;
+          esac
+
+          if [ "$NPM_DIST_TAG" != "$expected_tag" ]; then
+            echo "::error::${GITHUB_REF#refs/heads/} releases must publish with npm dist-tag '${expected_tag}', got '${NPM_DIST_TAG}'"
+            exit 1
+          fi
+
+          ci_url="$(
+            gh run list \
+              --workflow ci.yml \
+              --branch "${GITHUB_REF#refs/heads/}" \
+              --commit "$GITHUB_SHA" \
+              --event push \
+              --limit 10 \
+              --json conclusion,url \
+              --jq '[.[] | select(.conclusion == "success")][0].url // ""'
+          )"
+
+          if [ -z "$ci_url" ]; then
+            # Deliberately narrower than "any successful ci.yml run for this SHA".
+            # The release branch's own push run is the one whose trigger set,
+            # runner selection, and job graph match what is being published —
+            # a green PR run for the same SHA ran against a merge ref with a
+            # different trigger context. Accepting it here would let a publish
+            # proceed while the promotion run was still pending, or had failed.
+            echo "::error::No successful Cross-platform CI run found for ${GITHUB_SHA} on ${GITHUB_REF#refs/heads/} (push event). A pull-request run does not qualify. Wait for the promotion run to pass before releasing."
+            gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 10 || true
+            exit 1
+          fi
+
+          echo "Cross-platform CI passed for ${GITHUB_SHA}: ${ci_url}"
+
+          # Service baseline (lineage-relative): merged tags only, so the
+          # changed-files gate compares against the last release actually
+          # reachable from this commit. The release-notes baseline below uses the
+          # full tag set instead, so a stable on another lineage can anchor the
+          # changelog range.
+          # - Preview: newest prior release of either channel (stable or preview). A
+          #   preview→preview-only baseline skips a shipped stable and restates it.
+          # - Stable: newest prior stable only (matching preview carry adjusts the
+          #   generate-notes range separately below).
+          previous_tag="$(
+            git tag --merged HEAD --list 'v[0-9]*' |
+              bun scripts/release-notes.ts previous-release-tag "$RELEASE_VERSION"
+          )"
+          if [ -n "$previous_tag" ]; then
+            changed_files="$(git diff --name-only "${previous_tag}..HEAD")"
+          else
+            changed_files="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA")"
+          fi
+
+          # Keep in sync with the service-lifecycle.yml trigger paths. src/cli.ts is
+          # the pre-restructure compat stub that durable launchers still execute.
+          if printf '%s\n' "$changed_files" | grep -Eq '^(src/service\.ts|src/cli\.ts|src/cli/index\.ts|src/lib/bun-runtime\.ts|package\.json|bun\.lock|\.github/workflows/service-lifecycle\.yml)$'; then
+            service_url="$(
+              gh run list \
+                --workflow service-lifecycle.yml \
+                --commit "$GITHUB_SHA" \
+                --limit 10 \
+                --json conclusion,headSha,url,workflowName \
+                --jq '[.[] | select(.conclusion == "success")][0].url // ""'
+            )"
+            if [ -z "$service_url" ]; then
+              echo "::error::Service-related files changed since ${previous_tag:-initial commit}, but no successful Service lifecycle run was found for ${GITHUB_SHA}."
+              gh run list --workflow service-lifecycle.yml --commit "$GITHUB_SHA" --limit 10 || true
+              exit 1
+            fi
+            echo "Service lifecycle passed for ${GITHUB_SHA}: ${service_url}"
+          fi
+
+      # Tokenless publish via Trusted Publishing (OIDC) — NO NPM_TOKEN secret. npm auto-detects the
+      # OIDC environment (`id-token: write` above) and generates provenance automatically, so neither a
+      # token nor `--provenance` is needed. `npm publish` runs prepublishOnly first (typecheck + build
+      # the GUI into gui/dist), so even a dry-run fully verifies the build.
+      # PREREQUISITE: configure the Trusted Publisher for this repo + workflow on npmjs.com — possible
+      # only AFTER the package's first version exists (do the first publish locally, see the runbook).
+      - name: Preflight release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+
+          pkg_name="$(node -p "require('./package.json').name")"
+          release_tag="v${RELEASE_VERSION}"
+          dry_run="$DRY_RUN"
+
+          git fetch --force --tags origin
+
+          existing_tag_sha="$(git rev-parse -q --verify "refs/tags/${release_tag}^{commit}" || true)"
+          if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::${release_tag} already points at ${existing_tag_sha}, not ${GITHUB_SHA}"
+            exit 1
+          fi
+
+          if [ -n "$existing_tag_sha" ]; then
+            if [ "$dry_run" = "true" ]; then
+              echo "::notice::${release_tag} already exists at this commit; dry-run only"
+            else
+              echo "::error::${release_tag} already exists. Refusing to publish a version with pre-existing Git metadata."
+              exit 1
+            fi
+          fi
+
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            if [ "$dry_run" = "true" ]; then
+              echo "::notice::GitHub Release ${release_tag} already exists; dry-run only"
+            else
+              echo "::error::GitHub Release ${release_tag} already exists. Choose the next unused patch version."
+              exit 1
+            fi
+          fi
+
+          if npm view "${pkg_name}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+            if [ "$dry_run" = "true" ]; then
+              echo "::notice::${pkg_name}@${RELEASE_VERSION} already exists on npm; dry-run only"
+            else
+              echo "::error::${pkg_name}@${RELEASE_VERSION} already exists on npm. Choose the next unused patch version."
+              exit 1
+            fi
+          fi
+
+      - name: Build and validate release changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          NPM_DIST_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          notes_file="$GITHUB_WORKSPACE/.release-notes.md"
+          bun scripts/build-release-changelog.ts \
+            --version "$RELEASE_VERSION" \
+            --dist-tag "$NPM_DIST_TAG" \
+            --repository "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --out "$notes_file"
+          test -s "$notes_file" || {
+            echo "::error::release changelog builder produced an empty notes file"
+            exit 1
+          }
+
+      - name: Publish (or dry-run)
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+          NPM_DIST_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "::notice::DRY RUN — building + packing, not publishing"
+            npm run prepublishOnly
+            npm pack --dry-run
+          else
+            npm publish --tag "$NPM_DIST_TAG" --access public
+          fi
+
+      # Confirm the registry actually has the new version (real publishes only).
+      - name: Post-publish registry smoke
+        if: ${{ inputs.dry-run != true }}
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if VERSION=$(npm view "@bitkyc08/nexcode@${RELEASE_VERSION}" version 2>/dev/null); then
+              echo "registry version=$VERSION"
+              test "$VERSION" = "$RELEASE_VERSION"
+              npm dist-tag ls @bitkyc08/nexcode
+              exit 0
+            fi
+            echo "::notice::@bitkyc08/nexcode@${RELEASE_VERSION} not visible in npm registry yet (attempt $attempt/30)"
+            sleep 10
+          done
+          echo "::error::npm registry smoke failed after 30 attempts"
+          npm view @bitkyc08/nexcode versions dist-tags --json || true
+          exit 1
+
+      - name: Create GitHub release
+        if: ${{ inputs.dry-run != true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          release_tag="v${RELEASE_VERSION}"
+          notes_file="$GITHUB_WORKSPACE/.release-notes.md"
+          test -s "$notes_file" || {
+            echo "::error::validated release notes are missing; refusing to tag or create a release"
+            exit 1
+          }
+
+          git fetch --force --tags origin
+
+          existing_tag_sha="$(git rev-parse -q --verify "refs/tags/${release_tag}^{commit}" || true)"
+          if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::${release_tag} already points at ${existing_tag_sha}, not ${GITHUB_SHA}"
+            exit 1
+          fi
+
+          prerelease_flag=""
+          if [[ "$RELEASE_VERSION" == *-preview.* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
+          if [ -z "$existing_tag_sha" ]; then
+            git tag "$release_tag" "$GITHUB_SHA"
+            git push origin "refs/tags/${release_tag}"
+          fi
+
+          gh release create "$release_tag" --target "$GITHUB_SHA" --title "$release_tag" \
+            --notes-file "$notes_file" ${prerelease_flag:+$prerelease_flag}

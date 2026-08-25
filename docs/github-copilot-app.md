@@ -1,0 +1,69 @@
+# GitHub Copilot App
+
+NexCode can act as an **OpenAI-compatible model provider** for the GitHub Copilot
+desktop app (Settings → Model providers). This is a client integration: Copilot App
+calls NexCode; it is separate from the experimental upstream `github-copilot`
+provider that uses a Copilot subscription as a backend.
+
+## Requirements
+
+1. NexCode proxy running locally (`nxc start` / `nxc gui`).
+2. At least one configured provider with models (dashboard → Providers).
+3. GitHub Copilot desktop app with **Model providers** support.
+
+## Setup
+
+1. Start NexCode and confirm health:
+
+   ```bash
+   curl http://127.0.0.1:10100/healthz
+   curl http://127.0.0.1:10100/v1/models
+   ```
+
+2. In GitHub Copilot App: **Settings → Model providers → Add provider**.
+
+3. Configure:
+
+   | Field | Value |
+   | --- | --- |
+   | Name | `NexCode Gateway` (any label) |
+   | Base URL | `http://127.0.0.1:10100/v1` |
+   | API key | leave blank on loopback; for non-loopback binds use `NEXCODE_API_AUTH_TOKEN` |
+
+4. Sync models from the endpoint, or add a model by id (`provider/model`, e.g.
+   `anthropic/claude-sonnet-4-6`).
+
+5. Select a synced model and chat.
+
+## Endpoints used
+
+| Method | Path | Role |
+| --- | --- | --- |
+| `GET` | `/v1/models` | Model discovery (OpenAI list shape) |
+| `POST` | `/v1/chat/completions` | Chat turns (stream + non-stream) |
+
+NexCode translates Chat Completions into its internal Responses path, so all
+existing providers, routing, OAuth, and sidecars apply.
+
+## Supported fields
+
+The compatibility surface supports `model`, `messages`, `stream`, function tools
+and tool choice, token limits, temperature/top-p/stop, reasoning effort, parallel
+tool calls, prompt cache keys, metadata, and `response_format` on native Responses
+routes. Routed `openai-chat` models reject `response_format` with HTTP 400 because
+their structured-output support is not verified. Other Chat Completions fields,
+including penalties, `n`, and logprobs, are not currently supported.
+
+## Troubleshooting
+
+- **No models configured** — ensure the proxy is up, base URL ends with `/v1`
+  (not `/v1/chat/completions`), and `GET /v1/models` returns a non-empty `data`
+  array. Add/enable providers in the NexCode dashboard, then sync again.
+- **401** — remote (non-loopback) binds require the NexCode admission token in
+  `x-nexcode-api-key`. `Authorization` remains the upstream identity for native
+  direct-account mode.
+- **404 on chat** — older NexCode builds lacked `/v1/chat/completions`; upgrade
+  to a build that includes this surface.
+- **Model ids with `/`** — prefer the namespaced `provider/model` form returned
+  by `/v1/models`. If a client rejects slashes, add the model by an alias id you
+  control or open an issue for slash-safe aliases.
