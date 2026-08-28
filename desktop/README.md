@@ -1,36 +1,43 @@
 # NexCode Desktop
 
-This directory contains the native macOS shell and the reproducible local app
-packager. It does not import files from any sibling project; the packaged app
-receives its runtime, dashboard, dependencies, and Bun executable from this
-NexCode tree.
+This directory contains the native Windows shell and reproducible local app
+packager. The packaged app receives its runtime, dashboard, dependencies, and
+Bun executable from this NexCode tree. It renders the same `gui/dist`
+dashboard used during development, so themes and product behavior stay on one
+implementation.
 
-Build from the repository root:
+Build the x64 portable application and per-user installer from PowerShell:
 
-```bash
+```powershell
 npm run desktop:build
-open dist/NexCode.app
-
-# Build a drag-to-Applications installer image.
-npm run desktop:dmg
 ```
 
-The installer is written to `dist/NexCode.dmg`. Set
-`NEXCODE_SKIP_APP_BUILD=1` to package an already-built `NexCode.app` without
-rebuilding it first.
+The command writes these release artifacts to `dist/`:
 
-The app build copies only the runtime allowlist shown in `build-app.sh`; it does
-not copy the repository's `.env` files or the user's home/config directories.
-Before signing, packaging also scans the staged app for the configured Google
-OAuth client ID, client secret, and Google Cloud API key. The build fails
-without printing the credential if any configured value was captured in the
-app. Because DMG creation packages that verified `.app`, the same guarantee
-applies to both formats.
+- `NexCode-windows-x64/` — runnable portable directory containing
+  `NexCode.exe` and the bundled runtime.
+- `NexCode-windows-x64-portable.zip` — portable distribution archive.
+- `NexCode-Setup-<version>-x64.exe` — single-file installer with uninstall,
+  Start menu, desktop shortcut, and `nexcode://` protocol registration.
+
+Use `npm run desktop:portable` to omit the installer. Windows builds
+require Visual Studio 2019 or newer with the .NET Framework 4.7.2 targeting
+pack. The app uses the automatically updated Microsoft Edge WebView2 Runtime;
+Windows 10/11 normally provides it, and the app shows a recovery link when it
+is missing.
+
+The app build copies only the runtime allowlist shown in `build-windows.ps1`;
+it does not copy the repository's `.env` files or the user's home/config directories.
+Before signing or installer creation, packaging also scans the staged app for
+the configured Google OAuth client ID, client secret, and Google Cloud API key.
+The build fails without printing the credential if any configured value was
+captured in the app. The same check therefore covers the Windows portable
+archive and installer.
 
 The app starts the bundled proxy, discovers its actual loopback port, loads the
-dashboard in WebKit, opens external OAuth pages in the default browser, and asks
-the proxy to shut down cleanly when the app quits. The loopback service is an
-internal implementation detail rather than a user-facing browser entry point.
-After OAuth succeeds, the callback returns to NexCode through the registered
-`nexcode://oauth-complete` application URL. Runtime data is stored under
-`~/.nexcode` unless `NEXCODE_HOME` is set.
+dashboard in WebView2, opens external OAuth pages in the default browser, and
+asks the proxy to shut down cleanly when the app quits. The loopback service is
+an internal implementation detail rather than a
+user-facing browser entry point. After OAuth succeeds, the callback returns to
+NexCode through the registered `nexcode://oauth-complete` application URL.
+Runtime data is stored under `~/.nexcode` unless `NEXCODE_HOME` is set.

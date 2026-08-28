@@ -1,5 +1,7 @@
 node_modules/
 dist/
+desktop/windows/**/bin/
+desktop/windows/**/obj/
 .env
 *.log
 .DS_Store

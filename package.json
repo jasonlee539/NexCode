@@ -58,9 +58,8 @@
     "doctor:gui:full": "cd gui && bun run doctor:full",
     "doctor:gui:if-changed": "bun scripts/doctor-gui-if-changed.ts",
     "setup:hooks": "bun scripts/setup-hooks.ts",
-    "desktop:build": "bash desktop/scripts/build-app.sh",
-    "desktop:dmg": "bash desktop/scripts/build-dmg.sh",
-    "desktop:open": "open dist/NexCode.app"
+    "desktop:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build-windows.ps1",
+    "desktop:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/build-windows.ps1 -SkipInstaller"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",
