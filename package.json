@@ -2,7 +2,7 @@
   "name": "nexcode-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "NexCode local desktop app for Codex and ChatGPT accounts, threads, and Skills",
+  "description": "NexCode Ubuntu desktop app and universal provider proxy for Codex and Claude Code",
   "type": "module",
   "main": "./bin/package-main.mjs",
   "exports": {
@@ -60,7 +60,9 @@
     "setup:hooks": "bun scripts/setup-hooks.ts",
     "desktop:build": "bash desktop/scripts/build-app.sh",
     "desktop:dmg": "bash desktop/scripts/build-dmg.sh",
-    "desktop:open": "open dist/NexCode.app"
+    "desktop:open": "open dist/NexCode.app",
+    "ubuntu:deb": "bash desktop/linux/build-deb.sh",
+    "ubuntu:run": "python3 desktop/linux/nexcode-ubuntu.py"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",

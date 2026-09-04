@@ -1,10 +1,9 @@
 /* ============================================================================
-   nexcode dashboard — design system
-   Infra console in the OpenAI product grammar: white/near-black monochrome
-   base, black (light) / white (dark) primary actions, pill buttons, hairline
-   borders, flat surfaces, monospace for model ids / urls. Light + dark via
-   the native light-dark() function — every token is authored once;
-   `data-theme` (or the OS) picks the side.
+   NexCode Ubuntu dashboard.
+
+   The palette, typography and geometry follow Ubuntu's Yaru defaults. There is
+   intentionally no product theme picker: color-scheme follows the desktop's
+   light/dark preference and the native shell uses GTK's active system theme.
    ============================================================================ */
 
 @import "./styles/provider-catalog.css";
@@ -25,40 +24,40 @@
 @import "./styles-compatibility-matrix.css";
 
 :root {
-  /* default: follow the OS; [data-theme] below pins color-scheme so light-dark() obeys it */
+  /* Follow Ubuntu's system appearance; this edition has no product theme override. */
   color-scheme: light dark;
 
-  --bg:           light-dark(#ffffff, #212121);
-  --rail:         light-dark(#f9f9f9, #171717);
-  --surface:      light-dark(#ffffff, #262626);
-  --raised:       light-dark(#f4f4f4, #303030);
-  --raised-hover: light-dark(#ececec, #3a3a3a);
-  --border:       light-dark(#e6e6e6, #3d3d3d);
-  --border-soft:  light-dark(#f0f0f0, #333333);
-  --hover:        light-dark(rgba(13, 13, 13, 0.03), rgba(255, 255, 255, 0.03));
+  --bg:           light-dark(#f7f7f7, #1e1e1e);
+  --rail:         light-dark(#f2f2f2, #242424);
+  --surface:      light-dark(#ffffff, #2b2b2b);
+  --raised:       light-dark(#ebebeb, #363636);
+  --raised-hover: light-dark(#deddda, #444444);
+  --border:       light-dark(#cfcfcf, #4a4a4a);
+  --border-soft:  light-dark(#deddda, #3d3d3d);
+  --hover:        light-dark(rgba(60, 60, 60, 0.06), rgba(255, 255, 255, 0.06));
 
-  --text:  light-dark(#0d0d0d, #ececec);
-  --muted: light-dark(#6e6e6e, #a6a6a6);
-  --faint: light-dark(#707070, #9a9a9a);
+  --text:  light-dark(#3d3d3d, #f6f5f4);
+  --muted: light-dark(#5e5c64, #c0bfbc);
+  --faint: light-dark(#77767b, #9a9996);
 
-  /* monochrome primary: black actions on light, white actions on dark */
-  --accent:       light-dark(#0d0d0d, #ececec);
-  --accent-hover: light-dark(#3d3d3d, #ffffff);
-  --accent-ink:   light-dark(#ffffff, #0d0d0d);
-  --accent-soft:  light-dark(rgba(13, 13, 13, 0.06), rgba(255, 255, 255, 0.09));
-  --accent-ring:  light-dark(rgba(0, 0, 0, 0.5), rgba(255, 255, 255, 0.38));
+  /* Ubuntu/Yaru selection orange. */
+  --accent:       light-dark(#e95420, #e95420);
+  --accent-hover: light-dark(#c34113, #f66b38);
+  --accent-ink:   #ffffff;
+  --accent-soft:  light-dark(rgba(233, 84, 32, 0.12), rgba(233, 84, 32, 0.22));
+  --accent-ring:  light-dark(rgba(233, 84, 32, 0.48), rgba(233, 84, 32, 0.64));
 
-  --green:      light-dark(#0a7d5c, #4ecb9d);
-  --green-soft: light-dark(rgba(16, 163, 127, 0.10), rgba(78, 203, 157, 0.13));
-  --red:        light-dark(#b91c1c, #f87171);
-  --red-soft:   light-dark(rgba(185, 28, 28, 0.09), rgba(248, 113, 113, 0.13));
-  --amber:      light-dark(#9a4a08, #fbbf24);
-  --amber-soft: light-dark(rgba(180, 83, 9, 0.10), rgba(251, 191, 36, 0.13));
+  --green:      light-dark(#218838, #57e389);
+  --green-soft: light-dark(rgba(33, 136, 56, 0.12), rgba(87, 227, 137, 0.14));
+  --red:        light-dark(#c7162b, #ff7b63);
+  --red-soft:   light-dark(rgba(199, 22, 43, 0.10), rgba(255, 123, 99, 0.14));
+  --amber:      light-dark(#a05a00, #f8e45c);
+  --amber-soft: light-dark(rgba(160, 90, 0, 0.12), rgba(248, 228, 92, 0.14));
   /* Reserved for "something new is waiting" affordances (sidebar update orb). The base
      palette is monochrome, so blue is the one hue that reads as an offer rather than a
      warning (amber) or a failure (red). */
-  --blue:       light-dark(#1d4ed8, #7aa2ff);
-  --blue-soft:  light-dark(rgba(29, 78, 216, 0.10), rgba(122, 162, 255, 0.16));
+  --blue:       light-dark(#0066cc, #62a0ea);
+  --blue-soft:  light-dark(rgba(0, 102, 204, 0.10), rgba(98, 160, 234, 0.16));
 
   /* geometry: 4px base grid, three surface radii, and one pill radius */
   --space-0-5: 2px;
@@ -78,16 +77,16 @@
   --prose-measure: 70ch;
 
   --radius-2xs: 4px;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --radius-xs: 6px;
-  --radius-lg: 16px;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --radius-lg: 10px;
   --radius-round: 50%;
   --radius-pill: 999px;
 
   /* typography: product UI first, Korean-safe fallbacks, mono only for machine data */
-  --font-ui: "OpenAI Sans", "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
-  --font-code: ui-monospace, "SFMono-Regular", "Cascadia Code", "JetBrains Mono", "Noto Sans Mono CJK KR", Menlo, Consolas, monospace;
+  --font-ui: Ubuntu, Cantarell, "Noto Sans", system-ui, sans-serif;
+  --font-code: "Ubuntu Mono", "Noto Sans Mono", ui-monospace, monospace;
   --font: var(--font-ui);
   --mono: var(--font-code);
 
@@ -130,27 +129,23 @@
   --z-popover: 40;
   --z-modal: 50;
 
-  --shadow: 0 1px 2px light-dark(rgba(16, 24, 40, 0.06), rgba(0, 0, 0, 0.5)), 0 10px 28px light-dark(rgba(16, 24, 40, 0.07), rgba(0, 0, 0, 0.30));
-  --shadow-sm: 0 1px 2px light-dark(rgba(16, 24, 40, 0.06), rgba(0, 0, 0, 0.4));
+  --shadow: 0 1px 3px light-dark(rgba(0, 0, 0, 0.16), rgba(0, 0, 0, 0.42));
+  --shadow-sm: 0 1px 2px light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.32));
 
   /* toggle switch */
   --toggle-w: 36px;
   --toggle-h: 20px;
   --toggle-dot: 14px;
-  --toggle-off-bg: light-dark(#d4d4d4, #4a4a4a);
-  --toggle-on-bg: light-dark(#0d0d0d, #4ecb9d);
-  --toggle-dot-color: light-dark(#ffffff, #0d0d0d);
+  --toggle-off-bg: light-dark(#c0bfbc, #5e5c64);
+  --toggle-on-bg: var(--accent);
+  --toggle-dot-color: #ffffff;
 }
-
-/* explicit user choice pins the scheme; "system" removes the attribute and falls back to the OS */
-:root[data-theme="light"] { color-scheme: light; }
-:root[data-theme="dark"]  { color-scheme: dark; }
 
 /* glass material tokens: rail/nav layer only — content cards stay opaque */
 :root {
-  --glass-rail:  light-dark(rgba(249, 249, 249, 0.66), rgba(23, 23, 23, 0.62));
-  --glass-panel: light-dark(rgba(255, 255, 255, 0.78), rgba(38, 38, 38, 0.82));
-  --glass-blur:  saturate(1.6) blur(22px);
+  --glass-rail:  var(--rail);
+  --glass-panel: var(--surface);
+  --glass-blur:  none;
 }
 
 * { box-sizing: border-box; }
@@ -171,19 +166,8 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* single ambient soft-focus wash behind the app (OpenAI organic-blur grammar).
-   One wash per viewport; the glass rail and modals refract it via backdrop-filter. */
 body::before {
-  content: "";
-  position: fixed;
-  inset: -20%;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(42% 38% at 12% 6%,  light-dark(rgba(164, 196, 255, 0.42), rgba(96, 130, 200, 0.16)), transparent 70%),
-    radial-gradient(46% 42% at 88% 18%, light-dark(rgba(168, 226, 197, 0.38), rgba(88, 160, 130, 0.13)), transparent 70%),
-    radial-gradient(40% 36% at 70% 92%, light-dark(rgba(255, 224, 194, 0.30), rgba(180, 140, 100, 0.08)), transparent 72%);
-  filter: blur(70px);
+  content: none;
 }
 
 a { color: var(--text); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
@@ -260,7 +244,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   flex-shrink: 0;
   background: url(/logo.png) center / contain no-repeat;
   border-radius: 8px;
-  box-shadow: 0 5px 16px rgba(20, 184, 166, 0.18);
+  box-shadow: none;
 }
 .brand .name { font-weight: var(--weight-semibold); font-size: var(--text-subtitle); letter-spacing: 0; line-height: 26px; }
 .brand .ver {
@@ -2211,10 +2195,8 @@ button.prov-account-row.active { cursor: default; }
 .usage-source-mark { width: var(--icon-sm); height: var(--icon-sm); flex: 0 0 auto; object-fit: contain; }
 /* Only monochrome source marks (Grok) are inverted for dark themes. Brand-colored
    marks (Claude, Codex/OpenAI) must keep their brand color; inverting shifts the hue. */
-:root[data-theme="dark"] .usage-source-mark--mono { filter: invert(1); }
-
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .usage-source-mark--mono { filter: invert(1); }
+  .usage-source-mark--mono { filter: invert(1); }
 }
 
 @media (max-width: 760px) {

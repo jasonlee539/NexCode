@@ -26,10 +26,7 @@ import { useAppRouteState } from "./use-app-route-state";
 
 installApiAuthFetch();
 
-export type AppTheme = "light" | "dark" | "system";
-
 const API_BASE = import.meta.env.VITE_API_BASE || "";
-const THEME_KEY = "nxc-theme";
 
 const PAGE_TKEY: Record<Page, TKey> = {
   dashboard: "nav.dashboard",
@@ -63,33 +60,12 @@ function readRuntimeVersion(data: unknown): string | null {
   return typeof version === "string" && version.length > 0 ? version : null;
 }
 
-function readStoredTheme(): AppTheme {
-  try {
-    const value = localStorage.getItem(THEME_KEY);
-    return value === "light" || value === "dark" ? value : "system";
-  } catch {
-    return "system";
-  }
-}
-
 export default function App() {
   const { page, navigateToPage } = useAppRouteState();
   const { t } = useI18n();
-  const [theme, setTheme] = useState<AppTheme>(readStoredTheme);
   const [navOpen, setNavOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
-
-  useEffect(() => {
-    const element = document.documentElement;
-    if (theme === "system") {
-      element.removeAttribute("data-theme");
-      try { localStorage.removeItem(THEME_KEY); } catch { /* storage may be unavailable */ }
-    } else {
-      element.setAttribute("data-theme", theme);
-      try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage may be unavailable */ }
-    }
-  }, [theme]);
 
   useEffect(() => {
     const close = () => setNavOpen(false);
@@ -213,7 +189,7 @@ export default function App() {
             {page === "usage" && <DesktopUsage apiBase={API_BASE} />}
             {page === "skills" && <Skills apiBase={API_BASE} />}
             {page === "maintenance" && <Maintenance apiBase={API_BASE} />}
-            {page === "settings" && <Settings apiBase={API_BASE} theme={theme} onThemeChange={setTheme} />}
+            {page === "settings" && <Settings apiBase={API_BASE} />}
           </ErrorBoundary>
         </div>
       </main>

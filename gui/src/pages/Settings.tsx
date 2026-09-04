@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AppTheme } from "../App";
 import { IconGlobe, IconInfo, IconKey, IconMonitor } from "../icons";
 import { LOCALES, localeDisplayName, useI18n, type Locale } from "../i18n/shared";
 import { Select, Switch } from "../ui";
@@ -11,15 +10,7 @@ interface DesktopSettingsState {
   codexRuntimeVersion: string | null;
 }
 
-export default function Settings({
-  apiBase,
-  theme,
-  onThemeChange,
-}: {
-  apiBase: string;
-  theme: AppTheme;
-  onThemeChange: (theme: AppTheme) => void;
-}) {
+export default function Settings({ apiBase }: { apiBase: string }) {
   const { locale, setLocale, t } = useI18n();
   const [settings, setSettings] = useState<DesktopSettingsState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,12 +99,6 @@ export default function Settings({
     }
   };
 
-  const themeOptions: Array<{ value: AppTheme; label: string }> = [
-    { value: "light", label: t("theme.light") },
-    { value: "dark", label: t("theme.dark") },
-    { value: "system", label: t("theme.system") },
-  ];
-
   return (
     <div className="desktop-settings-page">
       <div className="desktop-section-toolbar">
@@ -125,16 +110,6 @@ export default function Settings({
       <div className="desktop-settings-columns">
         <section className="desktop-settings-group">
           <div className="desktop-settings-group__title"><IconMonitor aria-hidden /><span><strong>{t("settings.appearance")}</strong><small>{t("settings.appearanceDesc")}</small></span></div>
-          <div className="desktop-setting-row">
-            <div><strong>{t("theme.label")}</strong><small>{t("settings.themeDesc")}</small></div>
-            <div className="desktop-theme-segments" role="radiogroup" aria-label={t("theme.label")}>
-              {themeOptions.map(option => (
-                <button key={option.value} type="button" role="radio" aria-checked={theme === option.value} className={theme === option.value ? "is-active" : ""} onClick={() => onThemeChange(option.value)}>
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="desktop-setting-row">
             <div><strong>{t("lang.label")}</strong><small>{t("settings.languageDesc")}</small></div>
             <Select

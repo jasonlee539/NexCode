@@ -23,7 +23,7 @@ test("Usage renders every section in one scrollable column with a sticky strip",
   expect(page).toContain("<SectionTabs");
   expect(page).toContain("sectionAnchorId");
 
-  expect(app).toContain("<Usage apiBase={API_BASE} />");
+  expect(app).toContain("<DesktopUsage apiBase={API_BASE} />");
   expect(css).toContain("styles-usage-workspace.css");
   // The strip has to stay reachable while reading down the page.
   expect(css).toContain(".section-tabs");
@@ -247,10 +247,8 @@ test("Usage source marks keep brand colors and invert only the monochrome Grok m
   // Grok ships a black monochrome mark: it is the only one that needs dark-theme inversion.
   expect(page).toContain('usage-source-mark usage-source-mark--mono" src="/provider-icons/grok.svg"');
 
-  // Dark-theme inversion must be scoped to the mono modifier so brand hues survive.
-  expect(css).toContain(':root[data-theme="dark"] .usage-source-mark--mono { filter: invert(1); }');
-  expect(css).not.toContain(':root[data-theme="dark"] .usage-source-mark { filter: invert(1); }');
-  // The OS dark-mode (prefers-color-scheme) path must keep the same scoping.
-  expect(css).toContain(':root:not([data-theme="light"]) .usage-source-mark--mono { filter: invert(1); }');
-  expect(css).not.toContain(':root:not([data-theme="light"]) .usage-source-mark { filter: invert(1); }');
+  // System dark-mode inversion must stay scoped to the mono modifier so brand hues survive.
+  expect(css).toContain('.usage-source-mark--mono { filter: invert(1); }');
+  expect(css).not.toContain('.usage-source-mark { filter: invert(1); }');
+  expect(css).not.toContain('data-theme');
 });

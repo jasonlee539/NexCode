@@ -2,21 +2,21 @@
  * Native desktop presentation.
  *
  * The browser console keeps the dense administration layout from styles.css. The
- * packaged NexCode app gets a quieter, application-like shell: an icon rail, one
- * title bar, a rounded content canvas and a focused five-surface information
- * architecture. The visual language is intentionally NexCode's own — no third-party
- * logos or assets are reused here.
+ * packaged NexCode app gets a GTK/Yaru-aligned shell: an icon rail, native
+ * Ubuntu geometry, system colors and the desktop light/dark preference.
  */
 
 .app--desktop {
-  --desktop-green: light-dark(#16a86b, #56d99a);
-  --desktop-green-strong: light-dark(#0f8d59, #6be2aa);
-  --desktop-green-soft: light-dark(rgba(22, 168, 107, 0.10), rgba(86, 217, 154, 0.14));
-  --desktop-shell: light-dark(#f1f3f4, #151718);
-  --desktop-canvas: light-dark(#ffffff, #202223);
-  --desktop-card: light-dark(#ffffff, #252829);
-  --desktop-line: light-dark(#e8eaeb, #373a3b);
-  --desktop-muted: light-dark(#7d8589, #99a0a3);
+  /* Existing semantic variable names are retained to keep the large desktop
+     stylesheet stable; their values are Ubuntu/Yaru selection colors. */
+  --desktop-green: light-dark(#e95420, #e95420);
+  --desktop-green-strong: light-dark(#c34113, #f66b38);
+  --desktop-green-soft: light-dark(rgba(233, 84, 32, 0.12), rgba(233, 84, 32, 0.22));
+  --desktop-shell: light-dark(#f2f2f2, #242424);
+  --desktop-canvas: light-dark(#f7f7f7, #1e1e1e);
+  --desktop-card: light-dark(#ffffff, #2b2b2b);
+  --desktop-line: light-dark(#cfcfcf, #4a4a4a);
+  --desktop-muted: light-dark(#5e5c64, #c0bfbc);
 
   --accent: var(--desktop-green);
   --accent-hover: var(--desktop-green-strong);
@@ -78,8 +78,8 @@
 .app--desktop .brand-logo {
   width: 32px;
   height: 32px;
-  border-radius: 10px;
-  box-shadow: 0 8px 22px rgba(22, 168, 107, 0.18);
+  border-radius: 6px;
+  box-shadow: none;
 }
 
 .app--desktop .brand .name,
@@ -95,7 +95,7 @@
 
 .app--desktop .nav-entry {
   justify-content: center;
-  border-radius: 15px;
+  border-radius: 6px;
 }
 
 .app--desktop .nav-entry .nav-item {
@@ -110,7 +110,7 @@
   justify-content: center;
   gap: 0;
   border: 1px solid transparent;
-  border-radius: 11px;
+  border-radius: 6px;
   color: var(--desktop-muted);
 }
 
@@ -128,10 +128,8 @@
 .app--desktop .nav-item.active {
   color: var(--desktop-green-strong);
   background: var(--desktop-canvas);
-  border-color: light-dark(rgba(20, 34, 29, 0.04), rgba(255, 255, 255, 0.06));
-  box-shadow:
-    0 1px 2px light-dark(rgba(18, 30, 25, 0.06), rgba(0, 0, 0, 0.30)),
-    0 7px 18px light-dark(rgba(18, 30, 25, 0.06), rgba(0, 0, 0, 0.18));
+  border-color: var(--desktop-green);
+  box-shadow: none;
 }
 
 .app--desktop .nav-item.active svg {
@@ -149,7 +147,7 @@
   padding: 0;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 6px;
   color: var(--desktop-muted);
 }
 
@@ -167,17 +165,16 @@
 .app--desktop .main {
   min-width: 0;
   min-height: 0;
-  height: calc(100dvh - 20px);
-  margin: 10px 10px 10px 0;
+  height: 100dvh;
+  margin: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   background: var(--desktop-canvas);
-  border: 1px solid light-dark(rgba(20, 34, 29, 0.05), rgba(255, 255, 255, 0.05));
-  border-radius: 16px;
-  box-shadow:
-    0 1px 2px light-dark(rgba(19, 34, 28, 0.04), rgba(0, 0, 0, 0.32)),
-    0 15px 40px light-dark(rgba(19, 34, 28, 0.06), rgba(0, 0, 0, 0.22));
+  border: 0;
+  border-left: 1px solid var(--desktop-line);
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .desktop-titlebar {

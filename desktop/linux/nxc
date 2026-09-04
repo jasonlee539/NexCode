@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+RUNTIME_ROOT="${NEXCODE_UBUNTU_RUNTIME:-/usr/lib/nexcode-ubuntu/runtime}"
+BUN_BIN="$RUNTIME_ROOT/node_modules/bun/bin/bun.exe"
+if [ ! -x "$BUN_BIN" ]; then
+  BUN_BIN="$RUNTIME_ROOT/node_modules/bun/bin/bun"
+fi
+
+if [ ! -x "$BUN_BIN" ] || [ ! -f "$RUNTIME_ROOT/bin/nxc.mjs" ]; then
+  echo "nexcode: the packaged Ubuntu runtime is incomplete; reinstall nexcode-ubuntu." >&2
+  exit 1
+fi
+
+if [ "${1:-}" = "update" ]; then
+  echo "nexcode: this installation is managed by a Debian package." >&2
+  echo "Install a newer nexcode-ubuntu .deb with apt instead of running 'nxc update'." >&2
+  exit 2
+fi
+
+# The plain-JavaScript launcher snapshots the real parent environment before the
+# Bun child loads a project .env. Disable dotenv only for that first launcher;
+# the TypeScript runtime it starts retains NexCode's normal interpolation rules.
+exec "$BUN_BIN" --no-env-file "$RUNTIME_ROOT/bin/nxc.mjs" "$@"

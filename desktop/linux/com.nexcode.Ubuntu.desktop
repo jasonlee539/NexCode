@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=NexCode
+Comment=Local provider proxy for Codex and Claude Code
+Exec=nexcode-ubuntu %u
+Icon=nexcode-ubuntu
+Terminal=false
+Categories=Development;
+StartupNotify=true
+StartupWMClass=com.nexcode.Ubuntu
+MimeType=x-scheme-handler/nexcode;
+Keywords=Codex;Claude;LLM;AI;Proxy;
