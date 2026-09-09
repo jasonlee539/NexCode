@@ -61,7 +61,7 @@ export function CodexAccountSwitchModal({
           <strong title={accountLabel}>{accountLabel}</strong>
           {confirm.plan && <span className="badge badge-green">{confirm.plan}</span>}
         </div>
-        {confirm.id !== "__main__" && (
+        {accountModeState !== "direct" && (
           <div className="notice-warn"><IconAlert width={14} /> {t("codexAuth.cacheWarning")}</div>
         )}
         <div className="modal-actions">

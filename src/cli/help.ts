@@ -16,25 +16,25 @@ export function printVersion(): void {
 }
 
 export function printUsage(): void {
-  console.log(`nexcode (nxc) — Universal provider proxy for Codex
+  console.log(`nexcode (nxc) — Codex account and configuration manager
 
 Usage:
   nxc setup                   Interactive setup (alias: init)
-  nxc start [--port <port>]   Start the proxy server (auto-syncs models to Codex)
-  nxc stop                    Stop the proxy AND restore native Codex (plain codex works again)
-  nxc restore                 Restore native Codex without stopping (alias: eject)
-  nxc restore back            Re-point codex at the running proxy (undo restore)
+  nxc start [--port <port>]   Start the local management service
+  nxc stop                    Stop the local management service
+  nxc restore                 Remove legacy NexCode routing from Codex (alias: eject)
+  nxc restore back            Legacy compatibility command
   nxc recover-history --legacy-openai
                                Explicitly recover pre-backup syncResumeHistory rows
   nxc uninstall               Remove service/shim/config and restore native Codex (alias: remove)
   nxc service [sub]           Run as a background service (default: install/update/start)
-  nxc codex-shim <sub>        Auto-start proxy when \`codex\` launches (install|status|uninstall|remove)
+  nxc codex-shim <sub>        Manage the legacy Codex launcher shim (install|status|uninstall|remove)
   nxc tray <sub>              Windows status tray (install|start|stop|status|uninstall)
-  nxc ensure                  Ensure the proxy is running and Codex config/cache are current
+  nxc ensure                  Ensure the management service is running
   nxc sync [--restart-codex]  Fetch models from providers and inject into Codex config
   nxc sync-cache [--restart-codex]
                               Refresh Codex's model cache from the active catalog
-  nxc status                  Check proxy server status
+  nxc status                  Check management service status
   nxc doctor                  Diagnose environment/network issues (WSL, proxy, ChatGPT reachability)
   nxc doctor --reclaim-response-temps
                               Reclaim abandoned response-state temp files (works without a running proxy)
@@ -45,9 +45,9 @@ Usage:
   nxc logout <provider>       Remove a stored OAuth login
   nxc gui                     Open the nexcode dashboard
   nxc update [--tag <tag>]    Update nexcode (keeps preview installs on @preview)
-  nxc restart                  Stop and restart the proxy
+  nxc restart                  Restart the management service
   nxc v2 <sub>                multi_agent_v2 surface (status|on|off|mode|keep-native-v1|threads|mode-hint)
-  nxc health [--json]          Check proxy health (exit 0=healthy, 1=not)
+  nxc health [--json]          Check management service health (exit 0=healthy, 1=not)
   nxc ready [--json] [--wait [--timeout <s>]]  Check post-sync readiness (exit 0 only when ready)
   nxc provider <sub>          Providers, connectivity, quota, and selected models
   nxc account <sub>           Accounts, login/reauth, key pools, and quota controls

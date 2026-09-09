@@ -61,10 +61,11 @@ const commandRunners: Record<string, CommandRunner> = {
     return Number(process.exitCode ?? 0);
   },
   stop: async deps => {
-    // Downtime warning lives HERE, not in handleStop: `restart`/tray-restart callers
-    // re-start the proxy immediately, so warning there would contradict the next line.
+    // Lifecycle callers restart immediately, so only the explicit stop command
+    // reports that the management UI is now offline. Native Codex traffic is
+    // deliberately unaffected.
     if (await deps.handleStop()) {
-      console.log("⚠️  Codex/Claude requests through the proxy will fail until it is restarted ('nxc start' or 'nxc service start').");
+      console.log("ℹ️  NexCode dashboard and account management are offline; Codex requests remain direct.");
     }
     return Number(process.exitCode ?? 0);
   },
@@ -285,7 +286,7 @@ const commandRunners: Record<string, CommandRunner> = {
       deps.spawnDetached(deps.startArgv((config.port ?? 10100) > 0 ? (config.port ?? 10100) : undefined));
       live = await deps.waitForProxy();
       if (!live) {
-        console.error("❌ Proxy did not become healthy after starting. Not opening the GUI.");
+        console.error("❌ Management service did not become healthy after starting. Not opening the GUI.");
         return 1;
       }
     }
@@ -394,7 +395,7 @@ const commandRunners: Record<string, CommandRunner> = {
     if (wantsHealthJson) {
       console.log(JSON.stringify({ ok: !!live, pid: live?.pid ?? null, port: live?.port ?? null }));
     } else {
-      console.log(live ? `Proxy healthy (PID ${live.pid}, port ${live.port})` : "Proxy not healthy");
+      console.log(live ? `Management service healthy (PID ${live.pid}, port ${live.port})` : "Management service not healthy");
     }
     return live ? 0 : 1;
   },

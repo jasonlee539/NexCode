@@ -13,6 +13,10 @@ namespace NexCode.Desktop
     internal sealed class MainForm : Form
     {
         private const string WebView2DownloadUrl = "https://developer.microsoft.com/microsoft-edge/webview2/";
+        private const int MinimumClientWidth = 900;
+        private const int MinimumClientHeight = 600;
+        private const int PreferredClientWidth = 1600;
+        private const int PreferredClientHeight = 900;
         private readonly RuntimeController runtime = new RuntimeController();
         private readonly WebView2 webView = new WebView2();
         private readonly Panel overlay = new Panel();
@@ -33,15 +37,16 @@ namespace NexCode.Desktop
         private bool fullScreen;
         private Rectangle restoredBounds;
         private FormBorderStyle restoredBorderStyle;
+        private FormWindowState restoredWindowState;
 
         internal MainForm()
         {
             Text = "NexCode";
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(1215, 735);
-            MinimumSize = SizeFromClientSize(new Size(1215, 735));
-            MaximumSize = MinimumSize;
-            MaximizeBox = false;
+            ClientSize = new Size(1280, 720);
+            MinimumSize = SizeFromClientSize(new Size(MinimumClientWidth, MinimumClientHeight));
+            MaximumSize = Size.Empty;
+            MaximizeBox = true;
             KeyPreview = true;
             AutoScaleMode = AutoScaleMode.Dpi;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
@@ -53,9 +58,37 @@ namespace NexCode.Desktop
             runtime.Ready += delegate(Uri dashboard) { OnUi(delegate { ShowDashboard(dashboard); }); };
             runtime.Failed += delegate(string message) { OnUi(delegate { ShowError(message, false); }); };
 
+            Load += OnInitialLoad;
             Shown += OnFirstShown;
             FormClosing += OnFormClosing;
             KeyDown += OnWindowKeyDown;
+        }
+
+        private void OnInitialLoad(object sender, EventArgs args)
+        {
+            // Size in device pixels after WinForms has applied PerMonitorV2 DPI.
+            // This keeps roughly the same useful CSS workspace on 1080p, 2K and
+            // 4K monitors while still fitting smaller working areas and leaving
+            // the window freely resizable/maximizable.
+            Rectangle workingArea = Screen.FromControl(this).WorkingArea;
+            double scale = Math.Max(1.0, DeviceDpi / 96.0);
+            int frameWidth = Math.Max(0, Width - ClientSize.Width);
+            int frameHeight = Math.Max(0, Height - ClientSize.Height);
+            int margin = (int)Math.Round(48 * scale);
+            int availableWidth = Math.Max(1, workingArea.Width - frameWidth - margin);
+            int availableHeight = Math.Max(1, workingArea.Height - frameHeight - margin);
+            int minimumWidth = Math.Min((int)Math.Round(MinimumClientWidth * scale), availableWidth);
+            int minimumHeight = Math.Min((int)Math.Round(MinimumClientHeight * scale), availableHeight);
+            int targetWidth = Math.Max(minimumWidth, Math.Min((int)Math.Round(PreferredClientWidth * scale), availableWidth));
+            int targetHeight = Math.Max(minimumHeight, Math.Min((int)Math.Round(PreferredClientHeight * scale), availableHeight));
+
+            MinimumSize = SizeFromClientSize(new Size(minimumWidth, minimumHeight));
+            MaximumSize = Size.Empty;
+            ClientSize = new Size(targetWidth, targetHeight);
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(
+                workingArea.Left + Math.Max(0, (workingArea.Width - Width) / 2),
+                workingArea.Top + Math.Max(0, (workingArea.Height - Height) / 2));
         }
 
         internal void QueueInitialMessage(string message)
@@ -195,7 +228,7 @@ namespace NexCode.Desktop
             ContextMenuStrip menu = new ContextMenuStrip();
             menu.Items.Add("显示 NexCode", null, delegate { ShowAndActivate(); });
             menu.Items.Add("重新载入", null, delegate { ReloadDashboard(); });
-            menu.Items.Add("重启本地代理", null, async delegate
+            menu.Items.Add("重启管理服务", null, async delegate
             {
                 ShowAndActivate();
                 ShowLoading(false);
@@ -224,7 +257,12 @@ namespace NexCode.Desktop
                 settings.IsScriptEnabled = true;
                 settings.AreDefaultScriptDialogsEnabled = true;
                 settings.IsStatusBarEnabled = false;
-                settings.IsZoomControlEnabled = true;
+                // WebView2 persists zoom per origin in its user-data directory. A
+                // stray Ctrl+wheel therefore used to resize and reflow every card on
+                // later launches. NexCode is a fixed-size native surface, so always
+                // render its dashboard at the CSS size it was designed for.
+                settings.IsZoomControlEnabled = false;
+                webView.ZoomFactor = 1.0;
                 settings.AreDevToolsEnabled = false;
                 settings.UserAgent = settings.UserAgent + " NexCode/1.0";
 
@@ -258,7 +296,7 @@ namespace NexCode.Desktop
         private void ShowLoading(bool stopping)
         {
             statusLabel.Text = stopping ? "正在安全退出 NexCode" : "正在启动 NexCode";
-            detailLabel.Text = stopping ? "正在恢复客户端配置并关闭本地代理…" : "正在准备本地 AI 路由工作区…";
+            detailLabel.Text = stopping ? "正在关闭 NexCode 管理服务…" : "正在准备 NexCode 管理工作区…";
             retryButton.Visible = false;
             runtimeLink.Visible = false;
             progress.Visible = true;
@@ -283,6 +321,7 @@ namespace NexCode.Desktop
             overlay.Visible = true;
             overlay.BringToFront();
             webView.Visible = true;
+            webView.ZoomFactor = 1.0;
             webView.CoreWebView2.Navigate(dashboard.AbsoluteUri);
         }
 
@@ -323,6 +362,7 @@ namespace NexCode.Desktop
                 return;
             }
             overlay.Visible = false;
+            webView.ZoomFactor = 1.0;
             webView.Visible = true;
             Text = "NexCode";
             if (oauthNotificationPending) NotifyOAuthComplete();
@@ -410,7 +450,7 @@ namespace NexCode.Desktop
             if (!closeHintShown)
             {
                 closeHintShown = true;
-                trayIcon.ShowBalloonTip(2500, "NexCode 仍在运行", "双击托盘图标可重新打开；选择“完全退出”会安全关闭本地代理。", ToolTipIcon.Info);
+                trayIcon.ShowBalloonTip(2500, "NexCode 仍在运行", "双击托盘图标可重新打开；选择“完全退出”会安全关闭管理服务。", ToolTipIcon.Info);
             }
         }
 
@@ -437,8 +477,10 @@ namespace NexCode.Desktop
         {
             if (!fullScreen)
             {
-                restoredBounds = Bounds;
+                restoredWindowState = WindowState;
+                restoredBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
                 restoredBorderStyle = FormBorderStyle;
+                WindowState = FormWindowState.Normal;
                 MaximumSize = Size.Empty;
                 MinimumSize = Size.Empty;
                 FormBorderStyle = FormBorderStyle.None;
@@ -449,9 +491,12 @@ namespace NexCode.Desktop
             {
                 FormBorderStyle = restoredBorderStyle;
                 Bounds = restoredBounds;
-                ClientSize = new Size(1215, 735);
-                MinimumSize = SizeFromClientSize(new Size(1215, 735));
-                MaximumSize = MinimumSize;
+                double scale = Math.Max(1.0, DeviceDpi / 96.0);
+                MinimumSize = SizeFromClientSize(new Size(
+                    (int)Math.Round(MinimumClientWidth * scale),
+                    (int)Math.Round(MinimumClientHeight * scale)));
+                MaximumSize = Size.Empty;
+                WindowState = restoredWindowState;
                 fullScreen = false;
             }
         }

@@ -219,6 +219,9 @@ describe("headless GUI parity CLI", () => {
       ["/api/claude-desktop", "nxc claude desktop"],
       ["/api/claude/", "nxc observe"],
       ["/api/codex-auth", "nxc account"],
+      // Desktop-only process guard used before replacing native Codex auth.json.
+      // Headless callers rely on the server-side process probe instead.
+      ["/api/desktop", "(none — desktop-only)"],
       // GUI-only affordance: starring the repo from the sidebar. There is deliberately
       // no CLI mirror — the headless surface has nothing to gain from a one-click
       // social action, and inventing `nxc github star` would be a command nobody asked

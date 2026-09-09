@@ -1,17 +1,20 @@
 # NexCode
 
-NexCode 是一款 Windows 本地 AI 路由桌面软件。它把 Codex、Codex App、Claude Code、
-Claude Desktop、Grok Build 及兼容客户端接入同一个本地代理，并提供完整的原生
-Windows 应用与管理界面。
+> NexCode is a Codex management application, not a model-request proxy. Its
+> loopback port is used only by the local dashboard and management API. Codex
+> requests stay direct, and NexCode does not write `openai_base_url`.
+
+NexCode 是一款 Windows 本地 Codex 管理软件，提供原生 Windows 应用与账户管理界面。
+它不会接管 Codex CLI 或 Codex App 的模型请求；应用端口只承载本机仪表盘和管理 API，
+不会写入 `openai_base_url`，账号切换则直接更新 Codex 的原生登录凭据。
 
 ## 能力
 
-- 兼容 OpenAI Responses、Chat Completions、Anthropic Messages 与实时传输。
-- 支持内置及自定义 Provider、OAuth/API Key、模型发现与模型可见性管理。
-- 支持组合路由、失败切换、权重路由、账号池、配额感知和线程亲和。
-- 支持子代理模型路由、Web Search、视觉 sidecar、请求日志与用量分析。
-- 管理 Codex、Claude Code/Desktop、Grok、OpenCode、MCode、ZCode 等本地集成。
-- 提供配置备份/恢复、存储策略、兼容性实验室、健康检查和后台服务能力。
+- 管理多个 ChatGPT/Codex 账号、OAuth 登录状态与配额信息。
+- 通过加密登录档原子切换 Codex CLI 与 Codex App 实际使用的账号。
+- 管理 Codex 线程、用量、Skills、本地配置、健康检查和后台服务。
+- 切换前关闭已验证的 Codex 进程，失败时不更新界面的活动账号。
+- 启动时清理旧版本遗留的 NexCode 路由配置，同时保留用户自行配置的 Provider。
 - 使用独立的 `~/.nexcode` 数据目录和 `NEXCODE_HOME` 环境变量。
 
 ## 本地构建
@@ -27,7 +30,7 @@ npm run desktop:build
 ```
 
 构建产物包括 `dist/NexCode-windows-x64/NexCode.exe`、便携 ZIP 和单文件
-`dist/NexCode-Setup-<version>-x64.exe` 安装包。应用包内包含 Bun、代理源码、生产 GUI 和
+`dist/NexCode-Setup-<version>-x64.exe` 安装包。应用包内包含 Bun、管理服务源码、生产 GUI 和
 运行时依赖，不会读取相邻项目；移动源码目录后仍可独立运行。
 日常使用直接双击 `NexCode.exe`：管理界面由应用内置的 WebView2 窗口承载，不会
 跳转到浏览器。桌面侧栏固定保留仪表盘、账号、线程、用量、Skills、维护和设置；
@@ -52,7 +55,7 @@ node bin/nxc.mjs --help
 
 - `desktop/`：Windows 原生宿主、安装器、品牌资源和打包脚本。
 - `gui/`：React + Vite 管理界面。
-- `src/`：Bun TypeScript 代理、Provider、路由、集成和管理 API。
+- `src/`：Bun TypeScript 管理服务、Codex 集成和管理 API；旧代理实现仅保留作迁移兼容。
 - `tests/`：核心与 GUI 回归测试。
 - `docs-site/`：产品文档源码。
 

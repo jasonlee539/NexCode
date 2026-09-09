@@ -20,19 +20,19 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
     usage: "nxc setup",
     summary: "Interactive setup for providers and Codex config injection (alias of init).",
   },
-  { name: "start", usage: "nxc start [--port <port>]", summary: "Start the proxy server and sync models to Codex." },
-  { name: "stop", usage: "nxc stop", summary: "Stop the proxy and restore native Codex config." },
+  { name: "start", usage: "nxc start [--port <port>]", summary: "Start the local management service." },
+  { name: "stop", usage: "nxc stop", summary: "Stop the local management service." },
   {
     name: "restore",
     aliases: ["eject"],
     usage: "nxc restore [back]",
-    summary: "Restore native Codex config without stopping the proxy; `restore back` re-points codex at the running proxy.",
+    summary: "Remove legacy NexCode routing without stopping the management service.",
   },
   {
     name: "eject",
     aliases: [],
     usage: "nxc eject [back]",
-    summary: "Restore native Codex config without stopping the proxy; `eject back` re-points codex at the running proxy.",
+    summary: "Remove legacy NexCode routing without stopping the management service.",
   },
   {
     name: "recover-history",
@@ -72,7 +72,7 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "codex-shim",
     usage: "nxc codex-shim <install|status|uninstall|remove>",
-    summary: "Auto-start the proxy when `codex` launches.",
+    summary: "Manage the legacy Codex launcher shim.",
     details: ["Use `remove` as an alias for `uninstall`."],
   },
   {
@@ -80,12 +80,12 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
     usage: "nxc tray <install|start|stop|status|uninstall|remove> [--json] [--no-start]",
     summary: "Install and control the Windows status tray icon.",
     details: [
-      "The tray starts at Windows login and provides one-click proxy controls.",
-      "Tray start/stop controls the icon only; use its menu to start or stop the proxy.",
+      "The tray starts at Windows login and provides one-click management-service controls.",
+      "Tray start/stop controls the icon only; use its menu to start or stop the management service.",
       "--no-start (install only) installs the tray without launching it immediately.",
     ],
   },
-  { name: "ensure", usage: "nxc ensure", summary: "Ensure the proxy is running and Codex config/cache are current." },
+  { name: "ensure", usage: "nxc ensure", summary: "Ensure the management service is running." },
   {
     name: "sync",
     usage: "nxc sync [--restart-codex]",
@@ -104,7 +104,7 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
       "--restart-codex sends SIGTERM only to matching app-server / code-mode-host processes (may interrupt active turns).",
     ],
   },
-  { name: "status", usage: "nxc status", summary: "Check proxy server status." },
+  { name: "status", usage: "nxc status", summary: "Check management service status." },
   {
     name: "doctor",
     usage: "nxc doctor",
@@ -321,7 +321,7 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "restart",
     usage: "nxc restart",
-    summary: "Stop the proxy and restart it (background). Equivalent to stop + ensure.",
+    summary: "Restart the management service in the background. Equivalent to stop + ensure.",
   },
   {
     name: "v2",
@@ -339,7 +339,7 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "health",
     usage: "nxc health [--json]",
-    summary: "Check proxy health. Exits 0 if healthy, 1 otherwise.",
+    summary: "Check management service health. Exits 0 if healthy, 1 otherwise.",
     details: ["Use --json for structured output: {ok, pid, port}."],
   },
   {
@@ -381,13 +381,13 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
     name: "__tray-start",
     hidden: true,
     usage: "nxc __tray-start",
-    summary: "Hidden internal: start the tray proxy.",
+    summary: "Hidden internal: start the tray management service.",
   },
   {
     name: "__tray-restart",
     hidden: true,
     usage: "nxc __tray-restart",
-    summary: "Hidden internal: restart the tray proxy.",
+    summary: "Hidden internal: restart the tray management service.",
   },
   {
     name: "__startup-health",

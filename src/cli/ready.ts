@@ -153,10 +153,10 @@ function report(
       stdout.log(`Proxy ready (PID ${pid ?? "?"}, port ${port ?? "?"})`);
       return;
     case "pending":
-      stdout.log("Proxy running but not ready yet (pending).");
+      stdout.log("Management service running but not ready yet (pending).");
       return;
     case "failed":
-      stdout.log("Proxy running but not ready (sync failed).");
+      stdout.log("Management service running but not ready (sync failed).");
       return;
     case "unreachable":
       stdout.log("Proxy not reachable or readiness unavailable.");

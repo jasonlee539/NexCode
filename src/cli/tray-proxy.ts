@@ -110,17 +110,17 @@ export async function runTrayProxyStart(io: TrayProxyStartIo): Promise<boolean> 
   const live = await io.findLive();
   if (live) {
     if (io.existingIsSuccess === false) {
-      io.error("Proxy appeared while restart was confirming absence; no start was attempted.");
+      io.error("The management service appeared while absence was being confirmed; no start was attempted.");
       return false;
     }
-    io.info(`Proxy already running on port ${live.port}.`);
+    io.info(`Management service already running on port ${live.port}.`);
     return true;
   }
 
   const service = io.diagnoseService();
   if (service.installed && !service.startable) {
     io.error(`Cannot start from the tray because the installed service is not viable: ${service.summary}`);
-    io.error("Repair or remove the service before starting a direct proxy.");
+    io.error("Repair or remove the installed service before starting it directly.");
     return false;
   }
 
@@ -129,10 +129,10 @@ export async function runTrayProxyStart(io: TrayProxyStartIo): Promise<boolean> 
 
   const started = await io.waitForProxy();
   if (!started) {
-    io.error("Proxy did not become healthy after the tray start action.");
+    io.error("Management service did not become healthy after the tray start action.");
     return false;
   }
-  io.info(`Proxy running on port ${started.port}.`);
+  io.info(`Management service running on port ${started.port}.`);
   return true;
 }
 

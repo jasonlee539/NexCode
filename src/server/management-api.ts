@@ -72,6 +72,7 @@ import { CatalogGatherBusyError } from "../codex/catalog/provider-fetch";
 import type { CatalogDisposition, ConvergeCodex } from "../codex/convergence-types";
 import { normalizeCatalogDisposition } from "../codex/catalog-refresh-status";
 import { managementBodyTooLargeResponse } from "./management/body";
+import { isManagementOnlyRuntime } from "../product-mode";
 
 // installed npm version instead of a stale hardcode.
 export const VERSION = (() => {
@@ -281,7 +282,10 @@ export async function handleManagementAPI(
     const { ConfigMutationLockError } = await import("../config");
     const { CodexCredentialRefreshLockTimeoutError } = await import("../codex/account-store");
     try {
-      return await handleCodexAuthAPI(req, url, config, convergeCodexCatalog);
+      return await handleCodexAuthAPI(req, url, config, convergeCodexCatalog, {
+        managementOnly: isManagementOnlyRuntime(),
+        switchManagedAccount: deps.switchManagedCodexAccount,
+      });
     } catch (error) {
       // Credential writers remap ConfigMutationLockError to CodexCredentialRefreshLockTimeoutError;
       // treat both as the same retryable busy response.

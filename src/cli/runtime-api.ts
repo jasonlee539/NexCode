@@ -43,7 +43,7 @@ export class RuntimeApiError extends Error {
 export async function runtimeBaseUrl(deps: RuntimeApiDeps = {}): Promise<string> {
   if (deps.baseUrl) return deps.baseUrl.replace(/\/$/, "");
   const live = await findLiveProxy();
-  if (!live) throw new RuntimeApiError("Proxy is not running. Start it with: nxc start", 503, null);
+  if (!live) throw new RuntimeApiError("Management service is not running. Start it with: nxc start", 503, null);
   return `http://${probeHostname(live.hostname)}:${live.port}`;
 }
 

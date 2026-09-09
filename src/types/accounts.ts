@@ -21,6 +21,8 @@ export interface CodexAccount {
 export interface CodexAccountCredentials {
   accessToken: string;
   refreshToken: string;
+  /** OIDC token required by Codex's native chatgpt auth envelope. */
+  idToken?: string;
   expiresAt: number;
   chatgptAccountId: string;
 }
@@ -28,6 +30,8 @@ export interface CodexAccountCredentials {
 export interface CodexAccountCredentialRecord {
   credential?: CodexAccountCredentials;
   generation: number;
+  /** Pool credential generation last materialized into the native-profile vault. */
+  nativeProfileCredentialGeneration?: number;
   refreshGrantFingerprint?: string;
   deletedAt?: number;
   replacedAt?: number;

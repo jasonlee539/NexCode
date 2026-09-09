@@ -62,19 +62,19 @@ namespace NexCode.Desktop
 
         private void StartCore(int currentGeneration)
         {
-            Uri existing = WaitForHealthyRuntime(TimeSpan.FromSeconds(1.2), currentGeneration);
-            if (existing != null)
-            {
-                DeliverReady(currentGeneration, existing);
-                return;
-            }
-
             string runtimeRoot;
             string bunPath;
             string cliPath;
             if (!TryResolveBundledRuntime(out runtimeRoot, out bunPath, out cliPath))
             {
                 DeliverFailure(currentGeneration, "NexCode 运行时不完整，请重新安装或重新构建应用。");
+                return;
+            }
+
+            Uri existing = WaitForHealthyRuntime(TimeSpan.FromSeconds(1.2), currentGeneration);
+            if (existing != null)
+            {
+                DeliverReady(currentGeneration, existing);
                 return;
             }
 
@@ -127,7 +127,7 @@ namespace NexCode.Desktop
             TryTerminate(child);
             string detail = CurrentLogTail();
             string suffix = string.IsNullOrWhiteSpace(detail) ? "" : "\r\n\r\n最近的运行日志：\r\n" + detail;
-            DeliverFailure(currentGeneration, "本地代理未能在 30 秒内就绪。" + suffix);
+            DeliverFailure(currentGeneration, "NexCode 管理服务未能在 30 秒内就绪。" + suffix);
         }
 
         private void StopCore(int currentGeneration, Process child)
@@ -191,7 +191,7 @@ namespace NexCode.Desktop
                 }
                 string detail = CurrentLogTail();
                 string suffix = string.IsNullOrWhiteSpace(detail) ? "" : "\r\n\r\n最近的运行日志：\r\n" + detail;
-                DeliverFailure(currentGeneration, "NexCode 代理已退出（状态码 " + exitCode + "）。" + suffix);
+                DeliverFailure(currentGeneration, "NexCode 管理服务已退出（状态码 " + exitCode + "）。" + suffix);
             });
         }
 
@@ -212,6 +212,8 @@ namespace NexCode.Desktop
             startInfo.RedirectStandardOutput = true;
             startInfo.RedirectStandardError = true;
             startInfo.EnvironmentVariables["NEXCODE_DESKTOP_APP"] = "1";
+            startInfo.EnvironmentVariables["NEXCODE_MANAGEMENT_ONLY"] = "1";
+            startInfo.EnvironmentVariables["NEXCODE_DESKTOP_BUNDLE_ID"] = ReadDesktopBundleId(runtimeRoot);
             startInfo.EnvironmentVariables["NXC_BUN_RUNTIME_SOURCE"] = "bundled";
             startInfo.EnvironmentVariables["NXC_BUN_RUNTIME_PATH"] = bunPath;
             startInfo.EnvironmentVariables["PATH"] = BuildDesktopPath(
@@ -271,7 +273,22 @@ namespace NexCode.Desktop
             root = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime");
             bun = Path.Combine(root, "bin", "bun.exe");
             cli = Path.Combine(root, "src", "cli", "index.ts");
-            return File.Exists(bun) && File.Exists(cli);
+            return File.Exists(bun) && File.Exists(cli) && ReadDesktopBundleId(root) != null;
+        }
+
+        private static string ReadDesktopBundleId(string runtimeRoot)
+        {
+            try
+            {
+                string value = File.ReadAllText(Path.Combine(runtimeRoot, "desktop-bundle-id.txt")).Trim().ToLowerInvariant();
+                if (value.Length != 64) return null;
+                foreach (char character in value)
+                {
+                    if (!Uri.IsHexDigit(character)) return null;
+                }
+                return value;
+            }
+            catch { return null; }
         }
 
         private Uri WaitForHealthyRuntime(TimeSpan timeout, int currentGeneration)
@@ -370,6 +387,8 @@ namespace NexCode.Desktop
         {
             try
             {
+                string expectedBundleId = ReadDesktopBundleId(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime"));
+                if (expectedBundleId == null) return false;
                 Uri health = new Uri(dashboard, "healthz");
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(health);
                 request.Method = "GET";
@@ -384,7 +403,9 @@ namespace NexCode.Desktop
                     JavaScriptSerializer json = new JavaScriptSerializer();
                     Dictionary<string, object> body = json.Deserialize<Dictionary<string, object>>(reader.ReadToEnd());
                     return string.Equals(JsonString(body, "service"), "nexcode", StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(JsonString(body, "status"), "ok", StringComparison.Ordinal);
+                        && string.Equals(JsonString(body, "status"), "ok", StringComparison.Ordinal)
+                        && string.Equals(JsonString(body, "mode"), "management", StringComparison.Ordinal)
+                        && string.Equals(JsonString(body, "desktopBundleId"), expectedBundleId, StringComparison.Ordinal);
                 }
             }
             catch { return false; }

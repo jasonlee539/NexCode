@@ -15,6 +15,7 @@ import type {
   readCodexAppServerState,
 } from "../../codex/app-server-restart-service";
 import type { DesktopRoutesDeps } from "./desktop-routes";
+import type { switchManagedCodexAccount } from "../../codex/managed-account-switch";
 
 export interface ManagementApiDeps {
   /** Platform seam for capability projections; does not alter host-level startup behavior. */
@@ -81,6 +82,8 @@ export interface ManagementApiDeps {
    */
   desktopRoutes?: DesktopRoutesDeps;
   nativeProfileApi?: NativeProfileApiDeps;
+  /** Test seam for the physical CODEX_HOME/auth.json account switch. */
+  switchManagedCodexAccount?: typeof switchManagedCodexAccount;
   /**
    * Log Guard mutation seam. Production leaves this unset and therefore uses the
    * owner-verified process enumerator, trusted L namespace and real config store.

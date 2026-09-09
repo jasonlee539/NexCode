@@ -8,6 +8,7 @@ import {
   takeOption,
   type RuntimeApiDeps,
 } from "./runtime-api";
+import { isManagementOnlyRuntime } from "../product-mode";
 
 const USAGE = `Usage:
   nxc access key [list] [--json]
@@ -94,8 +95,15 @@ async function testModel(argv: string[], deps: RuntimeApiDeps): Promise<void> {
   printData(result, wantsJson, [`${model}: ${protocol} request succeeded.`]);
 }
 
-export async function handleAccessCommand(argv: string[], deps: RuntimeApiDeps = {}): Promise<number> {
+export async function handleAccessCommand(
+  argv: string[],
+  deps: RuntimeApiDeps = {},
+  options: { managementOnly?: boolean } = {},
+): Promise<number> {
   return runCliAction(async () => {
+    if (options.managementOnly === true || isManagementOnlyRuntime()) {
+      throw new CliUsageError("nxc access is unavailable: NexCode's port serves management APIs only.");
+    }
     const [sub = "key", ...rest] = argv;
     if (sub === "key" || sub === "keys") await key(rest, deps);
     else if (sub === "endpoints") await endpoints(rest, deps);

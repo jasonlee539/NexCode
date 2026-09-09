@@ -162,6 +162,9 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
   }, []);
 
   const handleAccountAdded = useCallback((completion: CodexAccountMutationCompletion) => {
+    const reauthenticatedAccount = reauthId
+      ? accounts.find(account => account.id === reauthId) ?? null
+      : null;
     void controller.syncAfterAccountAdded();
     showActionFeedback(
       t(completion.catalogRefreshPending
@@ -170,12 +173,32 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
       completion.catalogRefreshPending ? "warn" : "ok",
     );
     closeAddModal();
-  }, [closeAddModal, controller, showActionFeedback, t]);
+    if (simple && reauthenticatedAccount) setConfirm(reauthenticatedAccount);
+  }, [accounts, closeAddModal, controller, reauthId, showActionFeedback, simple, t]);
 
   const setActive = async (id: string | null) => {
-    const result = await controller.switchAccount(id);
+    if (simple) {
+      try {
+        const response = await fetch(`${apiBase}/api/desktop/codex/force-quit`, { method: "POST" });
+        const stopped = await response.json().catch(() => ({})) as { ok?: boolean; surviving?: number; error?: string };
+        if (!response.ok || stopped.ok !== true || (stopped.surviving ?? 0) > 0 || stopped.error) {
+          showActionFeedback(t("codexAuth.switchFailed"), "err");
+          return;
+        }
+      } catch {
+        showActionFeedback(t("codexAuth.switchFailed"), "err");
+        return;
+      }
+    }
+    const result = await controller.switchAccount(id, { confirmedStopped: simple });
     if (!result.ok) {
       if (result.reason === "busy") return;
+      if (result.reason === "reauth" && id) {
+        setConfirm(null);
+        openReauth(id);
+        showActionFeedback(t("codexAuth.needsReauth"), "warn");
+        return;
+      }
       showActionFeedback(t("codexAuth.switchFailed"), "err");
       return;
     }

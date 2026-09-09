@@ -8,6 +8,18 @@ const FALLBACK_MS = 3600 * 1000;
 const TOLERANCE_MS = 30_000;
 
 describe("ChatGPT OAuth token response parsing", () => {
+  test("retains the OIDC token required by native Codex account switching", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      access_token: "at",
+      refresh_token: "rt",
+      id_token: "native-id-token",
+      expires_in: 3600,
+    }), { status: 200 })) as typeof fetch;
+
+    const cred = await refreshChatGPTToken("secret");
+    expect(cred.idToken).toBe("native-id-token");
+  });
+
   test("refresh with a non-finite expires_in falls back to the 3600s default", async () => {
     globalThis.fetch = (async () => new Response(
       // JSON.stringify would turn Infinity into null; hand-write 1e999 so JSON.parse

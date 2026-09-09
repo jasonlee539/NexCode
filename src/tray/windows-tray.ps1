@@ -157,9 +157,9 @@ $statusItem.Enabled = $false
 $safetyItem = New-Object System.Windows.Forms.ToolStripMenuItem
 $safetyItem.Enabled = $false
 $openItem = $menu.Items.Add("Open Dashboard")
-$startItem = $menu.Items.Add("Start Proxy")
-$stopItem = $menu.Items.Add("Stop Proxy and Restore Native Routing")
-$restartItem = $menu.Items.Add("Restart Proxy")
+$startItem = $menu.Items.Add("Start Management Service")
+$stopItem = $menu.Items.Add("Stop Management Service")
+$restartItem = $menu.Items.Add("Restart Management Service")
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 [void]$menu.Items.Add($statusItem)
 [void]$menu.Items.Add($safetyItem)
@@ -227,7 +227,7 @@ function Update-TrayState {
   $script:online = $null -ne $health -and $health.status -eq "ok" -and $health.service -eq "nexcode" -and [int]$health.port -eq $script:port -and $pidMatches
   $script:proxyPid = if ($script:online) { [int]$health.pid } else { $null }
   if ($script:online) {
-    $statusItem.Text = "Proxy: Online (port $($script:port))"
+    $statusItem.Text = "Management Service: Online (port $($script:port))"
     $notify.Text = "nexcode: Online"
     $startItem.Enabled = $false
     $stopItem.Enabled = $true
@@ -242,8 +242,8 @@ function Update-TrayState {
       $notify.Icon = $warningIcon
     }
   } else {
-    $statusItem.Text = "Proxy: Offline"
-    $safetyItem.Text = "Restart safety: start the proxy to inspect"
+    $statusItem.Text = "Management Service: Offline"
+    $safetyItem.Text = "Service recovery: start the management service to inspect"
     $notify.Text = "nexcode: Offline"
     $notify.Icon = $offlineIcon
     $startItem.Enabled = $true
@@ -263,9 +263,9 @@ function Update-TrayState {
   if ($null -ne $script:pendingAction) {
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $elapsed = $now - $script:pendingStarted
-    $reached = ($script:pendingAction -eq "Start Proxy" -and $script:online) -or
-      ($script:pendingAction -eq "Stop Proxy" -and -not $script:online) -or
-      ($script:pendingAction -eq "Restart Proxy" -and $elapsed -gt 3000 -and $script:online -and $script:proxyPid -ne $script:pendingOldProxyPid)
+    $reached = ($script:pendingAction -eq "Start Management Service" -and $script:online) -or
+      ($script:pendingAction -eq "Stop Management Service" -and -not $script:online) -or
+      ($script:pendingAction -eq "Restart Management Service" -and $elapsed -gt 3000 -and $script:online -and $script:proxyPid -ne $script:pendingOldProxyPid)
     $commandFailed = $false
     if ($null -ne $script:pendingProcess) {
       try {
@@ -286,8 +286,8 @@ function Update-TrayState {
 
 $openItem.add_Click({ Start-NxcCommand @("gui") })
 $startItem.add_Click({
-  if (-not (Set-PendingAction "Start Proxy" 75)) { return }
-  $statusItem.Text = "Proxy: Starting..."
+  if (-not (Set-PendingAction "Start Management Service" 75)) { return }
+  $statusItem.Text = "Management Service: Starting..."
   # service start can spend 20s and the CLI then observes health for another 40s.
   $startProcess = Start-NxcCommand @("__tray-start") -TrackExit
   if ($startProcess -is [System.Diagnostics.Process]) {
@@ -297,8 +297,8 @@ $startItem.add_Click({
   }
 })
 $stopItem.add_Click({
-  if (-not (Set-PendingAction "Stop Proxy" 15)) { return }
-  $statusItem.Text = "Proxy: Stopping..."
+  if (-not (Set-PendingAction "Stop Management Service" 15)) { return }
+  $statusItem.Text = "Management Service: Stopping..."
   $stopProcess = Start-NxcCommand @("stop") -TrackExit
   if ($stopProcess -is [System.Diagnostics.Process]) {
     $script:pendingProcess = $stopProcess
@@ -307,8 +307,8 @@ $stopItem.add_Click({
   }
 })
 $restartItem.add_Click({
-  if (-not (Set-PendingAction "Restart Proxy" 160)) { return }
-  $statusItem.Text = "Proxy: Restarting..."
+  if (-not (Set-PendingAction "Restart Management Service" 160)) { return }
+  $statusItem.Text = "Management Service: Restarting..."
   # /api/system/restart may drain active work for 60s and then spend up to 70s
   # handing off to an identity-verified replacement. The tray observes health/PID
   # rather than the detached CLI exit, so keep a watchdog margin around that shared

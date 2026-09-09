@@ -125,6 +125,13 @@ import { tryAcquireNativeMainProfileClaim } from "./native-main-admission";
 import { withNativeMainSharedClaim } from "./native-main-claim";
 import { resolveNativeProfileContext } from "./native-profile-store";
 import { NativeProfileError } from "./native-profile-types";
+import { switchManagedCodexAccount } from "./managed-account-switch";
+import { isManagementOnlyRuntime } from "../product-mode";
+
+export interface CodexAuthApiDeps {
+  managementOnly?: boolean;
+  switchManagedAccount?: typeof switchManagedCodexAccount;
+}
 
 function isNativeMainClaimUnavailable(error: unknown): error is NativeProfileError {
   return error instanceof NativeProfileError
@@ -1250,7 +1257,21 @@ export async function listCodexAuthAccountsSnapshot(
 ): Promise<CodexAuthAccountsSnapshot> {
   const runtimeConfig = getRuntimeConfig(config);
   const poolAccounts = (runtimeConfig.codexAccounts ?? []).filter(isSelectableCodexPoolAccount);
-  const mainResult = await fetchMainAccountInfoAttempt(forceRefresh, 1);
+  // While a managed pool profile owns physical auth.json, that credential is
+  // already represented by its pool row. Do not duplicate it as the "main"
+  // card or probe its quota under the wrong identity; keep a neutral original
+  // login card so the user can switch back.
+  const managedOriginalInactive = isManagementOnlyRuntime()
+    && runtimeConfig.activeCodexAccountId !== undefined
+    && runtimeConfig.activeCodexAccountId !== MAIN_CODEX_ACCOUNT_ID;
+  const mainResult: MainAccountInfoFetchResult = managedOriginalInactive
+    ? {
+        info: EMPTY_MAIN_ACCOUNT_INFO,
+        credentialChecked: false,
+        hasCredential: true,
+        identityGeneration: captureMainAccountIdentityGeneration(),
+      }
+    : await fetchMainAccountInfoAttempt(forceRefresh, 1);
   const refreshedPool = await mapWithConcurrency(poolAccounts, POOL_QUOTA_REFRESH_CONCURRENCY, async account => {
     const cred = getCodexAccountCredential(account.id);
     let quotaResult: PoolQuotaResult;
@@ -1299,8 +1320,11 @@ export async function listCodexAuthAccountsSnapshot(
     const resultGeneration = quotaResult.credentialGeneration ?? quotaResult.freshCredentialGeneration;
     const generationLive = resultGeneration === undefined
       || isCodexAccountGenerationLive(accountId, resultGeneration);
+    const nativeCredentialIncomplete = isManagementOnlyRuntime() && !currentCredential.idToken;
     const effectiveQuotaResult = !generationLive
       ? { quota: null, needsReauth: false }
+      : nativeCredentialIncomplete
+        ? { ...quotaResult, needsReauth: true }
       : quotaResult;
     // Response DTO can show the WHAM plan even when disk persistence fails closed (lock busy /
     // missing config). Persistence still remains generation-gated via reconcileFreshPoolAccountPlans.
@@ -1318,26 +1342,30 @@ export async function listCodexAuthAccountsSnapshot(
   const fetchedMainGeneration = mainResult.identityGeneration ?? captureMainAccountIdentityGeneration();
   const mainSnapshotLive = isMainAccountIdentityGenerationLive(fetchedMainGeneration);
   const mainInfo = mainSnapshotLive ? mainResult.info : EMPTY_MAIN_ACCOUNT_INFO;
-  const hasMainCredential = mainSnapshotLive && mainResult.credentialChecked
+  const hasMainCredential = managedOriginalInactive
+    ? true
+    : mainSnapshotLive && mainResult.credentialChecked
     ? mainResult.hasCredential
     : getMainAccountCredentialPresence() ?? false;
-  const mainNeedsReauth = (mainSnapshotLive && mainResult.credentialChecked && !hasMainCredential)
-    || isAccountNeedsReauth(MAIN_CODEX_ACCOUNT_ID);
+  const mainNeedsReauth = !managedOriginalInactive && (
+    (mainSnapshotLive && mainResult.credentialChecked && !hasMainCredential)
+    || isAccountNeedsReauth(MAIN_CODEX_ACCOUNT_ID)
+  );
   const mainHealth = projectCodexAccountHealth({
     accountId: MAIN_CODEX_ACCOUNT_ID,
     needsReauth: mainNeedsReauth,
   });
   const main: CodexAuthAccountDto = {
     id: MAIN_CODEX_ACCOUNT_ID,
-    email: maskEmail(mainInfo.email) ?? "Codex App login",
-    plan: mainInfo.plan,
+    email: managedOriginalInactive ? "" : maskEmail(mainInfo.email) ?? "Codex App login",
+    plan: managedOriginalInactive ? undefined : mainInfo.plan,
     logLabel: "main",
     isMain: true,
     paused: isCodexAccountPaused(runtimeConfig, MAIN_CODEX_ACCOUNT_ID),
     priority: getCodexAccountPriority(runtimeConfig, MAIN_CODEX_ACCOUNT_ID),
     hasCredential: hasMainCredential,
     needsReauth: mainNeedsReauth,
-    quota: mainInfo.quota ? {
+    quota: !managedOriginalInactive && mainInfo.quota ? {
       ...quotaForPlan({
         ...mainInfo.quota,
         updatedAt: getAccountQuota(MAIN_CODEX_ACCOUNT_ID)?.updatedAt ?? Date.now(),
@@ -1463,6 +1491,7 @@ export async function handleCodexAuthAPI(
   url: URL,
   config: NxcConfig,
   convergeCodexCatalog?: CodexAuthCatalogConvergence,
+  deps: CodexAuthApiDeps = {},
 ): Promise<Response | null> {
 
   if (url.pathname === "/api/codex-auth/accounts" && req.method === "GET") {
@@ -1632,7 +1661,7 @@ export async function handleCodexAuthAPI(
   }
 
   if (url.pathname === "/api/codex-auth/active" && req.method === "PUT") {
-    let body: { accountId: string | null };
+    let body: { accountId: string | null; confirmedStopped?: boolean };
     try { body = (await req.json()) as typeof body; } catch { return jsonResponse({ error: "Invalid JSON" }, 400); }
     const runtimeConfig = getRuntimeConfig(config);
     const targetAccountId = body.accountId ?? MAIN_CODEX_ACCOUNT_ID;
@@ -1647,6 +1676,19 @@ export async function handleCodexAuthAPI(
       const exists = (runtimeConfig.codexAccounts ?? [])
         .some(account => isSelectableCodexPoolAccount(account) && account.id === body.accountId);
       if (!exists) return jsonResponse({ error: "Account not found" }, 400);
+    }
+    if (deps.managementOnly === true || isManagementOnlyRuntime()) {
+      try {
+        await (deps.switchManagedAccount ?? switchManagedCodexAccount)(
+          targetAccountId,
+          body.confirmedStopped === true,
+        );
+      } catch (error) {
+        if (error instanceof NativeProfileError) {
+          return jsonResponse({ error: error.message, code: error.code, retryable: error.retryable }, error.status);
+        }
+        return jsonResponse({ error: "Native Codex account switch failed", code: "INTERNAL_ERROR" }, 500);
+      }
     }
     runtimeConfig.activeCodexAccountId = body.accountId ?? undefined;
     // "Use this account now" outranks selection order until the account is spent:
@@ -2027,6 +2069,7 @@ export async function handleCodexAuthAPI(
                 const credential: CodexAccountCredentials = {
                   accessToken: cred.access,
                   refreshToken: cred.refresh,
+                  idToken: cred.idToken,
                   expiresAt: cred.expires,
                   chatgptAccountId: oauthAccountId,
                 };

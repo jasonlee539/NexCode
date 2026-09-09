@@ -175,6 +175,38 @@ function spawnLockProbe(
 }
 
 describe("native main profile transactions", () => {
+  test("refreshes an inactive encrypted profile without changing the active login", async () => {
+    const f = await enrolledFixture();
+    const refreshed = envelope("account-target", "refreshed");
+
+    await f.manager.replaceInactive(f.targetProfile.id, refreshed);
+    expect(readFileSync(join(f.codexHome, "auth.json"), "utf8")).toBe(f.source);
+
+    await f.manager.switch(f.targetProfile.id, true);
+    expect(readFileSync(join(f.codexHome, "auth.json"), "utf8")).toBe(refreshed);
+  });
+
+  test("rejects refreshing an inactive profile with a different account identity", async () => {
+    const f = await enrolledFixture();
+
+    await expect(f.manager.replaceInactive(
+      f.targetProfile.id,
+      envelope("different-account", "replacement"),
+    )).rejects.toMatchObject<Partial<NativeProfileError>>({ code: "AUTH_INVALID" });
+    expect(readFileSync(join(f.codexHome, "auth.json"), "utf8")).toBe(f.source);
+  });
+
+  test("refreshes the active profile in place only after the Codex process guard", async () => {
+    const f = await enrolledFixture();
+    await f.manager.switch(f.targetProfile.id, true);
+    const refreshed = envelope("account-target", "active-refreshed");
+
+    const result = await f.manager.replaceActive(f.targetProfile.id, refreshed, true);
+
+    expect(result.restartRequired).toBe(true);
+    expect(readFileSync(join(f.codexHome, "auth.json"), "utf8")).toBe(refreshed);
+  });
+
   test("an abruptly exited child releases the OS-backed profile transaction", async () => {
     const f = fixture();
     const readyPath = join(f.root, "crash-ready");

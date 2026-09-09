@@ -39,6 +39,7 @@ import {
 import { withCatalogWriteSerialization } from "./catalog-write-serialization";
 import { restoreCodexCatalogWithPermit } from "./catalog/sync";
 import { syncCodexHistoryProvider, type CodexHistoryFailureReason } from "./history-provider";
+import { isManagementOnlyRuntime } from "../product-mode";
 import {
   describeHistoryJobFailure,
   deriveCodexHistoryOperation,
@@ -119,6 +120,8 @@ export function applyEol(content: string, eol: "\r\n" | "\n"): string {
  */
 
 export interface InjectCodexOptions {
+  /** Explicit product-mode seam for callers/tests that must forbid routing writes. */
+  managementOnly?: boolean;
   /**
    * Absolute or CODEX_HOME-relative catalog path to advertise to Codex. Pass `null` only when the
    * nexcode catalog could not be materialized; Codex will then keep its native catalog instead of
@@ -674,6 +677,14 @@ export async function injectCodexConfig(
   config?: NxcConfig,
   options: InjectCodexOptions = {},
 ): Promise<CodexInjectResult> {
+  if (options.managementOnly === true || isManagementOnlyRuntime()) {
+    return {
+      success: true,
+      status: "skipped",
+      skippedReason: "desired_disabled",
+      message: "NexCode is management-only; openai_base_url was not written.",
+    };
+  }
   // Point Codex at the unauthenticated loopback listener when it is enabled (#1102).
   //
   // Resolved here rather than at the call sites because every caller already passes the proxy

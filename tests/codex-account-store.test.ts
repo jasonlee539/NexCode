@@ -78,6 +78,24 @@ describe("codex-account-store CRUD", () => {
     expect(readCodexAccountRecord("wrapped")).toMatchObject({ credential: cred, generation: 1 });
   });
 
+  test("tracks which credential generation was materialized into native auth", async () => {
+    const {
+      markNativeProfileCredentialGeneration,
+      readCodexAccountRecord,
+      saveCodexAccountCredential,
+    } = await import("../src/codex/account-store");
+    const cred = { accessToken: "tk_a", refreshToken: "rf_a", expiresAt: Date.now() + 3600_000, chatgptAccountId: "acc_a" };
+    saveCodexAccountCredential("work", cred);
+
+    expect(markNativeProfileCredentialGeneration("work", 0)).toBe(false);
+    expect(markNativeProfileCredentialGeneration("work", 1)).toBe(true);
+    expect(readCodexAccountRecord("work")?.nativeProfileCredentialGeneration).toBe(1);
+
+    saveCodexAccountCredential("work", { ...cred, accessToken: "tk_b" });
+    expect(readCodexAccountRecord("work")?.generation).toBe(2);
+    expect(readCodexAccountRecord("work")?.nativeProfileCredentialGeneration).toBeUndefined();
+  });
+
   test("remove credential deletes entry", async () => {
     const { saveCodexAccountCredential, removeCodexAccountCredential, getCodexAccountCredential, listCodexAccountIds, readCodexAccountRecord } = await import("../src/codex/account-store");
     saveCodexAccountCredential("temp", { accessToken: "t", refreshToken: "r", expiresAt: 0, chatgptAccountId: "c" });

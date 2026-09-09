@@ -44,6 +44,7 @@ import {
   nativeIdentityHint,
   nativeProfileSelectorKey,
   OsNativeProfileKeyProvider,
+  parseNativeEnvelopeBytes,
   publicNativeProfile,
   readNativeEnvelope,
   readNativeEnvelopeResult,
@@ -1245,6 +1246,114 @@ export class NativeProfileManager {
       observed.raw.fill(0);
       throw error;
     }
+  }
+
+  /** Refresh an inactive profile from a newly authenticated pool credential. */
+  async replaceInactive(targetSelector: string, content: string): Promise<{ profile: NativeProfilePublic }> {
+    return this.withLock(async () => {
+      this.assertNoPendingRecovery();
+      requireFileCredentialStore(this.context);
+      const vault = this.requireVault();
+      let key: NativeProfileKey | null = null;
+      let current: NativeEnvelopeSnapshot | null = null;
+      let replacement: NativeEnvelopeSnapshot | null = null;
+      let replacementRaw: Buffer | null = null;
+      try {
+        key = await this.keyForVault(vault);
+        current = this.readEnvelope(this.context.authPath);
+        this.assertCurrentIdentity(vault, current, key);
+        const profile = this.resolveTarget(vault, targetSelector);
+        replacementRaw = Buffer.from(content, "utf8");
+        replacement = parseNativeEnvelopeBytes(replacementRaw);
+        if (nativeIdentityHash(key.key, replacement.accountId) !== profile.identityHash) {
+          throw new NativeProfileError(
+            "AUTH_INVALID",
+            "The refreshed credential does not belong to the selected native profile.",
+            409,
+          );
+        }
+        const prospectiveVault = structuredClone(vault);
+        const refreshed = prospectiveVault.profiles.find(item => item.id === profile.id)!;
+        refreshed.payload = encryptNativeEnvelope(
+          this.context,
+          refreshed.id,
+          refreshed.identityHash,
+          replacement,
+          key,
+        );
+        refreshed.updatedAt = new Date(this.now()).toISOString();
+        prospectiveVault.revision += 1;
+        serializeNativeProfileMetadata(prospectiveVault);
+        await this.writeVault(prospectiveVault);
+        return { profile: publicNativeProfile(refreshed) };
+      } finally {
+        current?.raw.fill(0);
+        replacement?.raw.fill(0);
+        replacementRaw?.fill(0);
+        key?.key.fill(0);
+      }
+    });
+  }
+
+  /** Replace refreshed credentials for the currently active identity in-place. */
+  async replaceActive(
+    targetSelector: string,
+    content: string,
+    confirmedStopped = false,
+  ): Promise<{ profile: NativeProfilePublic; restartRequired: true }> {
+    return this.withLock(async () => {
+      requireFileCredentialStore(this.context);
+      await this.assertNativeCodexStopped(confirmedStopped);
+      if (probeNativeProfileRecoveryState(this.context) !== "none") await this.recoverLocked(false);
+      const vault = this.requireVault();
+      let key: NativeProfileKey | null = null;
+      let current: NativeEnvelopeSnapshot | null = null;
+      let replacement: NativeEnvelopeSnapshot | null = null;
+      let replacementRaw: Buffer | null = null;
+      let writeAttempted = false;
+      try {
+        key = await this.keyForVault(vault);
+        current = this.readEnvelope(this.context.authPath);
+        const active = this.assertCurrentIdentity(vault, current, key);
+        const selector = nativeProfileSelectorKey(targetSelector);
+        if (selector !== nativeProfileSelectorKey(active.id) && selector !== nativeProfileSelectorKey(active.label)) {
+          throw new NativeProfileError("INVALID_REQUEST", "The requested native profile is not active.", 400);
+        }
+        replacementRaw = Buffer.from(content, "utf8");
+        replacement = parseNativeEnvelopeBytes(replacementRaw);
+        if (nativeIdentityHash(key.key, replacement.accountId) !== active.identityHash) {
+          throw new NativeProfileError(
+            "AUTH_INVALID",
+            "The refreshed credential does not belong to the active native profile.",
+            409,
+          );
+        }
+        writeAttempted = true;
+        await this.atomicWrite(this.context.authPath, replacement.text);
+        const observed = this.verifyWrittenEnvelope(replacement.digest, active.identityHash, key);
+        observed.raw.fill(0);
+        return { profile: publicNativeProfile(active), restartRequired: true };
+      } catch (cause) {
+        if (!writeAttempted) throw cause;
+        try {
+          await this.atomicWrite(this.context.authPath, current!.text);
+          const restored = this.verifyWrittenEnvelope(current!.digest, nativeIdentityHash(key!.key, current!.accountId), key!);
+          restored.raw.fill(0);
+        } catch {
+          throw new NativeProfileError(
+            "AUTH_RESTORE_FAILED",
+            "The original native login could not be verified after a credential refresh failure.",
+            500,
+          );
+        }
+        throw new NativeProfileError("SWITCH_ROLLED_BACK", "The refreshed login was rejected and the exact original login was restored.", 409);
+      } finally {
+        current?.raw.fill(0);
+        replacement?.raw.fill(0);
+        replacementRaw?.fill(0);
+        key?.key.fill(0);
+      }
+    });
   }
 
   async switch(targetSelector: string, confirmedStopped = false): Promise<Record<string, unknown>> {

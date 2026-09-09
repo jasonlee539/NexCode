@@ -63,6 +63,7 @@ function credsFromToken(data: Record<string, unknown>): OAuthCredentials {
   return {
     access: accessToken,
     refresh: (data.refresh_token as string) ?? "",
+    ...(idToken ? { idToken } : {}),
     expires,
     accountId: extractAccountId(idToken, accessToken),
     email: extractEmail(idToken, accessToken),

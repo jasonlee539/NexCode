@@ -189,6 +189,13 @@ the secret itself.
 
 ## Config injection
 
+The NexCode Desktop product runs in management-only mode. Its loopback port is
+not a data plane, every `/v1/*` request is rejected, and production CLI paths do
+not invoke config injection. Startup restores NexCode-owned residue from older
+versions, including `openai_base_url`, without removing a user-owned provider or
+base URL. The injection implementation documented below remains only as legacy
+restore/migration compatibility and for isolated historical runtime tests.
+
 `src/codex/inject.ts` writes one of two forms. The choice is not cosmetic: it decides whether Codex
 keeps its native provider id, which decides whether existing thread history still resolves.
 

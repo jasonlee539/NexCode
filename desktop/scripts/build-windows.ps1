@@ -73,9 +73,11 @@ function Copy-Directory {
 function Copy-TrackedSourceTree {
   param([Parameter(Mandatory = $true)][string]$Destination)
   New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-  $paths = & git.exe -C $root ls-files -- src
+  # Package the complete working source tree, including newly added files that
+  # have not been committed yet. Ignored files remain excluded.
+  $paths = & git.exe -C $root ls-files --cached --others --exclude-standard -- src
   if ($LASTEXITCODE -ne 0 -or $paths.Count -eq 0) {
-    throw "Unable to enumerate tracked runtime source files."
+    throw "Unable to enumerate runtime source files."
   }
   foreach ($relative in $paths) {
     if (-not $relative.StartsWith("src/", [StringComparison]::Ordinal)) { continue }
@@ -224,6 +226,16 @@ New-Item -ItemType Directory -Path (Join-Path $runtime "bin") -Force | Out-Null
 Copy-Item -LiteralPath $bun -Destination (Join-Path $runtime "bin\bun.exe") -Force
 Copy-TrackedSourceTree -Destination (Join-Path $runtime "src")
 Copy-Directory -Source (Join-Path $root "gui\dist") -Destination (Join-Path $runtime "gui\dist")
+# Bind the native shell to the exact dashboard it ships. Vite's index references
+# content-hashed assets, so its SHA-256 changes whenever the UI bundle changes.
+# The runtime advertises this identifier and the shell refuses to adopt an older
+# management service that happens to still own the configured port.
+$desktopBundleId = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $runtime "gui\dist\index.html")).Hash.ToLowerInvariant()
+[IO.File]::WriteAllText(
+  (Join-Path $runtime "desktop-bundle-id.txt"),
+  $desktopBundleId,
+  [Text.Encoding]::ASCII
+)
 # The executable is already copied to runtime/bin. npm/Bun caches, old install
 # snapshots, bin shims, and typecheck-only packages are not runtime inputs and
 # would otherwise duplicate the 85 MiB Bun binary several times in every build.

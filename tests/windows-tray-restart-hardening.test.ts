@@ -25,7 +25,7 @@ describe("Windows tray restart process hardening", () => {
   expect(source).not.toContain(`try { $script:pendingProcess.Dispose() } ${emptyCatch}`);
   });
 
-  test("tracks Start Proxy and Stop Proxy exit codes like Restart Proxy", () => {
+  test("tracks management-service start and stop exit codes like restart", () => {
     expect(source).toContain('$startProcess = Start-NxcCommand @("__tray-start") -TrackExit');
     expect(source).toContain('$script:pendingProcess = $startProcess');
     expect(source).toContain('$stopProcess = Start-NxcCommand @("stop") -TrackExit');

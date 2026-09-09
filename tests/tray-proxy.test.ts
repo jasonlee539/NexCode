@@ -28,7 +28,7 @@ describe("tray proxy coordinator", () => {
   test("returns immediately when a proxy is already live", async () => {
     const { io, calls } = startIo({ findLive: async () => ({ port: 20200 }) });
     expect(await runTrayProxyStart(io)).toBe(true);
-    expect(calls).toEqual(["info:Proxy already running on port 20200."]);
+    expect(calls).toEqual(["info:Management service already running on port 20200."]);
   });
 
   test("restart fallback refuses a target that reappears during the final start check", async () => {
@@ -37,7 +37,7 @@ describe("tray proxy coordinator", () => {
       existingIsSuccess: false,
     });
     expect(await runTrayProxyStart(io)).toBe(false);
-    expect(calls.some(call => call.startsWith("error:Proxy appeared"))).toBe(true);
+    expect(calls.some(call => call.startsWith("error:The management service appeared"))).toBe(true);
     expect(calls).not.toContain("direct");
     expect(calls).not.toContain("service");
   });

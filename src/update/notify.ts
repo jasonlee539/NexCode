@@ -251,7 +251,7 @@ export async function maybeShowUpdatePrompt(): Promise<void> {
     const choice = answer === "" ? "1" : answer;
     if (choice === "1") {
       await runUpdate();
-      console.log("\nRestart the proxy:  nxc start");
+      console.log("\nRestart the management service:  nxc start");
       process.exit(0);
     } else if (choice === "3") {
       dismissVersion(channel, latest);

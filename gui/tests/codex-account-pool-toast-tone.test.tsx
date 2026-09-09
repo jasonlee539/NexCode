@@ -111,18 +111,56 @@ afterEach(async () => {
   await win.happyDOM?.close?.();
 });
 
-async function mountPool(controller: CodexAccountPoolController) {
+async function mountPool(controller: CodexAccountPoolController, simple = false) {
   const { createRoot } = await import("react-dom/client");
   await act(async () => {
     root = createRoot(host);
     root.render(
       <LanguageProvider>
-        <CodexAccountPool apiBase="" controller={controller} />
+        <CodexAccountPool apiBase="" controller={controller} simple={simple} />
       </LanguageProvider>,
     );
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
 }
+
+test("desktop account switching stops Codex before committing the native selection", async () => {
+  const events: string[] = [];
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/desktop/codex/force-quit") {
+        events.push("force-quit");
+        return Response.json({ ok: true, requested: 1, stopped: 1, surviving: 0, failed: 0 });
+      }
+      if (url.pathname === "/api/desktop/usage") return Response.json({ ranges: { "30d": null } });
+      if (url.pathname.startsWith("/api/codex-auth/")) {
+        return Response.json({ accounts: [], activeCodexAccountId: null, autoSwitchThreshold: 80 });
+      }
+      return Response.json({});
+    },
+  });
+  await mountPool(makeController({
+    switchAccount: async (id, options) => {
+      events.push(`switch:${id}:${options?.confirmedStopped === true}`);
+      return { ok: true, activeId: id };
+    },
+  }), true);
+
+  const select = [...host.querySelectorAll<HTMLButtonElement>("button")]
+    .find(button => button.textContent?.trim() === "Select");
+  expect(select).toBeTruthy();
+  await act(async () => { select!.click(); });
+  const confirm = win.document.querySelector<HTMLButtonElement>("dialog .btn-primary");
+  expect(confirm).toBeTruthy();
+  await act(async () => {
+    confirm!.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  expect(events).toEqual(["force-quit", "switch:pool-1:true"]);
+});
 
 async function chooseOrder(selectId: string, value: string): Promise<void> {
   const trigger = host.querySelector(`#${selectId}`) as HTMLButtonElement | null;

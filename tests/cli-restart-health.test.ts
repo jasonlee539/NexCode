@@ -54,7 +54,7 @@ describe("nxc restart", () => {
     try {
       const result = runCli(["help", "restart"], { NEXCODE_HOME: dir });
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("Stop the proxy and restart");
+      expect(result.stdout).toContain("Restart the management service");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -78,7 +78,7 @@ describe("nxc health", () => {
     try {
       const result = runCli(["help", "health"], { NEXCODE_HOME: dir });
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("Check proxy health");
+      expect(result.stdout).toContain("Check management service health");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

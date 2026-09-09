@@ -14,6 +14,7 @@ import { directLocalHttpFetch } from "./direct-local-http";
 
 export interface HealthzIdentity {
   service?: unknown;
+  mode?: unknown;
   status?: unknown;
   version?: unknown;
   uptime?: unknown;

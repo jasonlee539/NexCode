@@ -8,6 +8,7 @@ import { summarizeComboCatalogOmissions, type ComboCatalogOmission } from "./cat
 import { shouldSyncCodexOnStart } from "./desired-state";
 import { admitCodexWrite, type CodexAdmission } from "./admission";
 import type { CodexCatalogSyncOptions } from "./catalog/sync";
+import { isManagementOnlyRuntime } from "../product-mode";
 
 export interface CodexSyncResult {
   /**
@@ -34,6 +35,8 @@ export interface CodexSyncResult {
 }
 
 export interface CodexSyncOptions {
+  /** Explicit product-mode seam for callers/tests that must forbid routing writes. */
+  managementOnly?: boolean;
   /**
    * Explicit `nxc sync` is also the refresh path for side profiles that consume
    * the NexCode catalog without injection. When set, the sync still refreshes
@@ -80,6 +83,19 @@ export async function syncModelsToCodex(
   deps: CodexSyncDeps = defaultDeps,
   options: CodexSyncOptions = {},
 ): Promise<CodexSyncResult> {
+  if (options.managementOnly === true || isManagementOnlyRuntime()) {
+    return {
+      status: "skipped",
+      skippedReason: "desired_disabled",
+      ok: true,
+      added: 0,
+      catalogPath: null,
+      catalogExists: false,
+      catalogWritten: false,
+      cacheSynced: false,
+      message: "NexCode is management-only; Codex config was not changed.",
+    };
+  }
   // `config` can be the server's startup object. The decision, however, is a
   // durable user switch and must be read again at this production boundary: a
   // PUT OFF while provider discovery is in flight cannot be allowed to commit

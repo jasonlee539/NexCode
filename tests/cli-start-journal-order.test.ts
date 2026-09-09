@@ -145,7 +145,7 @@ describe("start and ensure journal ownership (#1230)", () => {
 
       const start = await runCli(fx, ["start"]);
       expect(start.exitCode).toBe(1);
-      expect(start.stderr).toContain("Proxy already running");
+      expect(start.stderr).toContain("Management service already running");
       expect(readFileSync(fx.configPath, "utf8")).toBe(injected);
       expect(existsSync(fx.journalPath)).toBe(true);
 

@@ -7,7 +7,7 @@ type DebugScope = "provider" | "usage" | "injection" | "claude";
 async function requireLiveProxy() {
   const live = await findLiveProxy();
   if (!live) {
-    console.error("Proxy is not running. Start it with: nxc start");
+    console.error("Management service is not running. Start it with: nxc start");
     process.exit(1);
   }
   return live;
@@ -25,7 +25,7 @@ async function fetchDebugSettings(): Promise<DebugSettingsView> {
     }
     return await res.json() as DebugSettingsView;
   } catch (err) {
-    console.error(`Proxy is running but /api/debug is unreachable: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`Management service is running but /api/debug is unreachable: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 }
@@ -53,7 +53,7 @@ function printScopeStatus(scope: DebugScope, view: DebugSettingsView): void {
   } else if (scope === "usage") {
     console.log(`Usage debug: ${view.usage ? "ON" : "off"}`);
     console.log(`  env=${view.env.usage ? "on" : "off"}, runtime=${view.runtimeOverride.usage === undefined ? "env/default" : view.runtimeOverride.usage ? "on" : "off"}`);
-    console.log("  Tail: nxc debug usage logs [-f] (via running proxy API)");
+    console.log("  Tail: nxc debug usage logs [-f] (via the running management API)");
   } else if (scope === "injection") {
     console.log(`Injection debug: ${view.injection ? "ON" : "off"}`);
     console.log(`  env=${view.env.injection ? "on" : "off"}, runtime=${view.runtimeOverride.injection === undefined ? "env/default" : view.runtimeOverride.injection ? "on" : "off"}`);
@@ -187,7 +187,7 @@ async function handleScopeCommand(scope: DebugScope, actionArgv: string[]): Prom
 }
 
 function printTopLevelHelp(): void {
-  console.log("Debug commands (proxy must be running):");
+  console.log("Debug commands (management service must be running):");
   console.log("");
   console.log("  nxc debug provider on|off|status|reset|logs [-f]");
   console.log("  nxc debug usage on|off|status|reset|logs [-f]");
@@ -212,7 +212,7 @@ export async function handleDebugCommand(argv: string[]): Promise<void> {
   if (sub === "" || sub === "help" || sub === "--help" || sub === "-h") {
     const live = await findLiveProxy();
     if (!live) {
-      console.log("Proxy is not running — env defaults for the next start:");
+      console.log("Management service is not running — env defaults for the next start:");
       console.log(`  provider → NXC_DEBUG = ${envDebugEnabled() ? "on" : "off"}`);
       console.log(`  usage    → ${DEBUG_ENV.usage} = ${process.env[DEBUG_ENV.usage] === "1" ? "on" : "off"}`);
       console.log(`  injection→ ${DEBUG_ENV.injection} = ${process.env[DEBUG_ENV.injection] === "1" ? "on" : "off"}`);

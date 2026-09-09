@@ -854,7 +854,7 @@ describe("handleStart NXC_SERVICE exit guard (source-level)", () => {
     expect(cliSource).toMatch(/process\.exit\(0\)/);
     const guard = cliSource.match(/if\s*\(process\.env\.NXC_SERVICE === "1"\)\s*\{[\s\S]{0,400}?process\.exit\(0\)/);
     expect(guard, "NXC_SERVICE guard must exit 0 when the port is already served").not.toBeNull();
-    const nonService = cliSource.match(/Proxy already running[\s\S]{0,200}?process\.exit\(1\)/);
+    const nonService = cliSource.match(/Management service already running[\s\S]{0,200}?process\.exit\(1\)/);
     expect(nonService, "non-service path keeps the exit 1 conflict error").not.toBeNull();
   });
 

@@ -44,6 +44,7 @@ import type { NxcConfig } from "../src/types";
 import type { WsData } from "../src/server/ws-bridge";
 import { handleNativeProfileAPI } from "../src/codex/native-profile-api";
 import type { NativeProfileManager } from "../src/codex/native-profile-manager";
+import { NativeProfileError } from "../src/codex/native-profile-types";
 import { MAIN_CODEX_ACCOUNT_ID, setMainAccountPlan } from "../src/codex/main-account";
 import { reconcileCodexPlansFromTokens, resetJwtPlanNotesForTests } from "../src/codex/plan-from-token";
 import {
@@ -136,6 +137,7 @@ async function completeMockCodexOAuth(options: {
   await oauthStore.saveCredential("chatgpt", {
     access: `access-${options.requestBody.id}`,
     refresh: `refresh-${options.requestBody.id}`,
+    idToken: `id-${options.requestBody.id}`,
     expires: Date.now() + 5 * 60_000,
     email: options.email,
     accountId: options.oauthAccountId,
@@ -2858,6 +2860,50 @@ describe("codex-auth API", () => {
     expect(config.activeCodexAccountId).toBe("pool-next");
   });
 
+  test("management account selection commits only after the native Codex login switches", async () => {
+    const config = makeConfig({
+      codexAccounts: [{ id: "pool-next", email: "pool-next@example.test", isMain: false }],
+    });
+    let switched = "";
+    const req = new Request("http://localhost/api/codex-auth/active", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: "pool-next", confirmedStopped: true }),
+    });
+    const resp = await handleCodexAuthAPI(req, new URL(req.url), config, undefined, {
+      managementOnly: true,
+      switchManagedAccount: async (accountId, confirmedStopped) => {
+        switched = `${accountId}:${confirmedStopped}`;
+        return { ok: true };
+      },
+    });
+
+    expect(resp!.status).toBe(200);
+    expect(switched).toBe("pool-next:true");
+    expect(config.activeCodexAccountId).toBe("pool-next");
+  });
+
+  test("management account selection leaves UI state unchanged when native switching fails", async () => {
+    const config = makeConfig({
+      codexAccounts: [{ id: "pool-next", email: "pool-next@example.test", isMain: false }],
+    });
+    const req = new Request("http://localhost/api/codex-auth/active", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: "pool-next", confirmedStopped: true }),
+    });
+    const resp = await handleCodexAuthAPI(req, new URL(req.url), config, undefined, {
+      managementOnly: true,
+      switchManagedAccount: async () => {
+        throw new NativeProfileError("CODEX_BUSY", "Codex is still running", 409);
+      },
+    });
+
+    expect(resp!.status).toBe(409);
+    expect(await resp!.json()).toMatchObject({ code: "CODEX_BUSY" });
+    expect(config.activeCodexAccountId).toBeUndefined();
+  });
+
   test("PUT /api/codex-auth/accounts/pause persists exclusion and applies to the next request", async () => {
     const config = makeConfig({
       codexAccounts: [
@@ -4306,7 +4352,7 @@ describe("codex-auth API", () => {
 
     expect(result.state).toMatchObject({ status: "done", accountId });
     expect(config.codexAccounts?.map(account => account.id)).toEqual([accountId]);
-    expect(getCodexAccountCredential(accountId)).not.toBeNull();
+    expect(getCodexAccountCredential(accountId)).toMatchObject({ idToken: `id-${accountId}` });
     expect(readCodexAccountRecord(accountId)).toMatchObject({
       lastCodexValidationStatus: "failed",
       lastCodexValidationError: "http_status:503",

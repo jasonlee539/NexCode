@@ -48,7 +48,7 @@ export type CodexAccountLoadState = "loading" | "ready" | "error";
 
 export type CodexAccountActionResult<T extends object = Record<never, never>> =
   | ({ ok: true } & T)
-  | { ok: false; reason: "busy" | "request" | "reload" };
+  | { ok: false; reason: "busy" | "request" | "reload" | "reauth" };
 
 /**
  * The auto-switch threshold arrives on the same /active response as the account list.
@@ -89,7 +89,10 @@ export interface CodexAccountPoolController {
   activePinnedId: string | null;
 
   load(refreshQuota?: boolean): Promise<boolean>;
-  switchAccount(id: string | null): Promise<CodexAccountActionResult<{ activeId: string | null }>>;
+  switchAccount(
+    id: string | null,
+    options?: { confirmedStopped?: boolean },
+  ): Promise<CodexAccountActionResult<{ activeId: string | null }>>;
   setAccountPaused(id: string, paused: boolean): Promise<CodexAccountActionResult>;
   /** `null` resets the account to the default order. Accepts the `__main__` sentinel. */
   setAccountPriority(id: string, priority: number | null): Promise<CodexAccountActionResult>;
@@ -345,7 +348,10 @@ export function useCodexAccountPool(apiBase: string, enabled = true): CodexAccou
     setPauseCount(pauseTokensRef.current!.size);
   }, []);
 
-  const switchAccount = useCallback(async (id: string | null) => {
+  const switchAccount = useCallback(async (
+    id: string | null,
+    options: { confirmedStopped?: boolean } = {},
+  ) => {
     // Cross-gated with the order write, not just with itself: both PUTs move the pin,
     // and in opposite directions, so letting them overlap lets the client settle on
     // the inverse of the server's final pin until a reload happens to correct it.
@@ -356,10 +362,18 @@ export function useCodexAccountPool(apiBase: string, enabled = true): CodexAccou
       const response = await fetch(`${apiBase}/api/codex-auth/active`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: id }),
+        body: JSON.stringify({ accountId: id, confirmedStopped: options.confirmedStopped === true }),
       });
-      if (!response.ok) throw new Error("account switch failed");
-      const result = await response.json().catch(() => ({})) as { activeCodexAccountId?: string | null };
+      const result = await response.json().catch(() => ({})) as {
+        activeCodexAccountId?: string | null;
+        code?: string;
+      };
+      if (!response.ok) {
+        if (result.code === "AUTH_INVALID" || result.code === "AUTH_MISSING") {
+          return { ok: false, reason: "reauth" } as const;
+        }
+        throw new Error("account switch failed");
+      }
       const selectedId = result.activeCodexAccountId ?? id;
       pendingActiveIdRef.current = { id: selectedId ?? null };
       setActiveId(selectedId ?? null);

@@ -13,6 +13,8 @@ export interface KiroOAuthMetadata {
 export type OAuthCredentials = {
   refresh: string;
   access: string;
+  /** OIDC identity token. Secret; retained for native Codex auth.json switching. */
+  idToken?: string;
   /** Epoch ms after any small provider-specific early-refresh margin; the shared gate adds 1 minute. */
   expires: number;
   email?: string;

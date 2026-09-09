@@ -158,7 +158,8 @@ namespace NexCode.Installer
                 Path.Combine(stage, "Microsoft.Web.WebView2.WinForms.dll"),
                 Path.Combine(stage, "runtime", "bin", "bun.exe"),
                 Path.Combine(stage, "runtime", "src", "cli", "index.ts"),
-                Path.Combine(stage, "runtime", "gui", "dist", "index.html")
+                Path.Combine(stage, "runtime", "gui", "dist", "index.html"),
+                Path.Combine(stage, "runtime", "desktop-bundle-id.txt")
             };
             if (required.Any(path => !File.Exists(path)))
             {
@@ -436,7 +437,7 @@ namespace NexCode.Installer
                 location.AutoEllipsis = true;
                 location.SetBounds(35, 165, 450, 28);
 
-                status.Text = "包含与 macOS 版一致的主题、前端和本地代理功能。";
+                status.Text = "包含与 macOS 版一致的主题、前端和 Codex 管理功能。";
                 status.TextAlign = ContentAlignment.MiddleCenter;
                 status.SetBounds(35, 195, 450, 28);
 

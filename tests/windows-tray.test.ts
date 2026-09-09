@@ -303,6 +303,9 @@ describe("Windows tray packaging and command safety", () => {
   test("PowerShell controller uses mutex/event shutdown and bans command evaluation", () => {
     const typescript = readFileSync(join(import.meta.dir, "..", "src", "tray", "windows.ts"), "utf8");
     const source = readFileSync(join(import.meta.dir, "..", "src", "tray", "windows-tray.ps1"), "utf8");
+    expect(source).toContain('$menu.Items.Add("Start Management Service")');
+    expect(source).toContain('$menu.Items.Add("Restart Management Service")');
+    expect(source).not.toContain('$menu.Items.Add("Start Proxy")');
     const cli = readFileSync(join(import.meta.dir, "..", "src", "cli", "index.ts"), "utf8");
     expect(typescript).not.toContain("\u0000");
     expect(typescript).toContain("NXC_TRAY_ENTRY_B64");
@@ -318,10 +321,10 @@ describe("Windows tray packaging and command safety", () => {
     expect(source).toContain('if ($null -ne $script:pendingAction)');
     expect(source).toContain('$startItem.Enabled = $false');
     expect(source).toContain('ignored because $($script:pendingAction) is still pending');
-    const startBudget = source.match(/Set-PendingAction "Start Proxy" (\d+)/);
+    const startBudget = source.match(/Set-PendingAction "Start Management Service" (\d+)/);
     expect(startBudget).not.toBeNull();
     expect(Number(startBudget![1])).toBeGreaterThanOrEqual(75);
-    const restartBudget = source.match(/Set-PendingAction "Restart Proxy" (\d+)/);
+    const restartBudget = source.match(/Set-PendingAction "Restart Management Service" (\d+)/);
     expect(restartBudget).not.toBeNull();
     expect(Number(restartBudget![1]) * 1000).toBeGreaterThanOrEqual(
       MEMORY_DRAIN_RESTART_MS + REPLACEMENT_READY_TIMEOUT_MS + 30_000,

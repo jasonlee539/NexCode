@@ -34,10 +34,18 @@ The build fails without printing the credential if any configured value was
 captured in the app. The same check therefore covers the Windows portable
 archive and installer.
 
-The app starts the bundled proxy, discovers its actual loopback port, loads the
+The app starts the bundled management service, discovers its actual loopback port, loads the
 dashboard in WebView2, opens external OAuth pages in the default browser, and
-asks the proxy to shut down cleanly when the app quits. The loopback service is
-an internal implementation detail rather than a
-user-facing browser entry point. After OAuth succeeds, the callback returns to
-NexCode through the registered `nexcode://oauth-complete` application URL.
+asks the service to shut down cleanly when the app quits. The loopback service
+serves only the dashboard and authenticated management APIs: `/v1/*` model
+requests are rejected, and NexCode never writes `openai_base_url` into Codex.
+Codex CLI and Codex App therefore continue to contact their native endpoint
+directly. On startup, NexCode removes routing fields left by earlier versions.
+
+Account selection is a native credential operation. After explicit confirmation,
+NexCode stops verified Codex App/CLI processes and atomically replaces the
+effective `CODEX_HOME/auth.json` through the encrypted native-profile vault.
+The dashboard updates its selected account only after that transaction succeeds.
+After OAuth succeeds, the callback returns to NexCode through the registered
+`nexcode://oauth-complete` application URL.
 Runtime data is stored under `~/.nexcode` unless `NEXCODE_HOME` is set.

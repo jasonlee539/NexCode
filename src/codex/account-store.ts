@@ -43,6 +43,7 @@ function isCredential(value: unknown): value is CodexAccountCredentials {
   return isObject(value)
     && typeof value.accessToken === "string"
     && typeof value.refreshToken === "string"
+    && (value.idToken === undefined || typeof value.idToken === "string")
     && typeof value.expiresAt === "number"
     && typeof value.chatgptAccountId === "string";
 }
@@ -50,6 +51,7 @@ function isCredential(value: unknown): value is CodexAccountCredentials {
 function isCredentialRecord(value: unknown): value is CodexAccountCredentialRecord {
   return isObject(value)
     && typeof value.generation === "number"
+    && (value.nativeProfileCredentialGeneration === undefined || typeof value.nativeProfileCredentialGeneration === "number")
     && (value.credential === undefined || isCredential(value.credential))
     && (value.refreshGrantFingerprint === undefined || typeof value.refreshGrantFingerprint === "string")
     && (value.deletedAt === undefined || typeof value.deletedAt === "number")
@@ -190,6 +192,19 @@ export function readCodexAccountRecord(id: string): CodexAccountCredentialRecord
 export function isCodexAccountGenerationLive(id: string, generation: number): boolean {
   const record = readCodexAccountRecord(id);
   return !!record?.credential && record.deletedAt == null && record.generation === generation;
+}
+
+export function markNativeProfileCredentialGeneration(id: string, generation: number): boolean {
+  return withCredentialMutationLockSync(() => {
+    const store = loadCodexAccountRecordStore();
+    const current = store[id];
+    if (!current || current.generation !== generation || current.deletedAt != null || !current.credential) {
+      return false;
+    }
+    store[id] = { ...current, nativeProfileCredentialGeneration: generation };
+    persist(store);
+    return true;
+  });
 }
 
 export function saveCodexAccountCredentialIfGeneration(
@@ -505,7 +520,7 @@ export async function getValidCodexToken(id: string): Promise<CodexTokenResult> 
         : "unknown" as const;
       throw new TokenRefreshError(reason, `Codex token refresh failed (${reason}); reauthenticate the account.`);
     }
-    const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+    const data = (await res.json()) as { access_token: string; refresh_token?: string; id_token?: string; expires_in: number };
     // Guard against a missing/non-finite/negative expires_in (malformed upstream
     // response): a NaN expiry would never compare as expired, and a negative
     // duration would stamp an already-past expiry — both block refresh semantics.
@@ -521,6 +536,7 @@ export async function getValidCodexToken(id: string): Promise<CodexTokenResult> 
     const updated: CodexAccountCredentials = {
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? lockedCred.refreshToken,
+      idToken: data.id_token ?? lockedCred.idToken,
       expiresAt: safeExpiresAt,
       chatgptAccountId: lockedCred.chatgptAccountId,
     };

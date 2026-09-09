@@ -199,6 +199,7 @@ import {
 import { SYSTEM_RESTART_CAPABILITY_VERSION } from "../lib/system-restart-contract";
 import { LOCAL_PROVIDER_RELOAD_CAPABILITY_VERSION } from "../lib/local-provider-reload-contract";
 import { createReadinessGate, type ReadinessGate } from "./readiness";
+import { isManagementOnlyRuntime } from "../product-mode";
 
 export const MAX_WS_FRAME_BYTES = 50 * 1024 * 1024;
 const WEBSOCKET_IDLE_TIMEOUT_SECONDS = 0;
@@ -435,6 +436,8 @@ function attachLiveSidebandUpstream(
 // export function relaySseWithHeartbeat
 
 export interface StartServerDeps {
+  /** Expose management surfaces only; every model/data-plane route is rejected. */
+  managementOnly?: boolean;
   /** Test-only seam; production always initializes its own management credential state. */
   managementAuthState?: ManagementAuthState;
   /** Test-only route dependencies, forwarded only after management admission succeeds. */
@@ -493,11 +496,16 @@ export function warnAgentTaskRecoveryStartup(config: {
 }
 
 export function startServer(port?: number, deps: StartServerDeps = {}): Server<WsData> {
+  const managementOnly = deps.managementOnly === true || isManagementOnlyRuntime();
+  const rawDesktopBundleId = process.env.NEXCODE_DESKTOP_BUNDLE_ID?.trim() ?? "";
+  const desktopBundleId = /^[0-9a-f]{64}$/i.test(rawDesktopBundleId)
+    ? rawDesktopBundleId.toLowerCase()
+    : undefined;
   const localAttestationSecret = deps.localAttestationSecret ?? createLocalAttestationSecret();
   const config = runModelRenameStartupMigration(runAlibabaRegionStartupMigration(runOpenAiTierStartupMigration(loadConfig())));
   warnAgentTaskRecoveryStartup(config);
   setLiveStateStoreConfig(config);
-  applyProxyEnv(config);
+  if (!managementOnly) applyProxyEnv(config);
   assertServerAuthConfig(config);
   const managementAuth = deps.managementAuthState ?? initializeManagementAuthState(config);
   let userCostOverlayReconciler: { stop(): void } | null = null;
@@ -546,7 +554,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   // home resolution and the acquisition can fail on a machine with no Codex home —
   // `getCodexHome()` THROWS when CODEX_HOME names a missing directory, which would
   // otherwise turn "no Codex installed" into "proxy will not start".
-  if (startupCacheOwnership.ownership === "owned") {
+  if (!managementOnly && startupCacheOwnership.ownership === "owned") {
     try {
       const startupCodexHome = getCodexHome();
       // #1046: record whether this actually rewrote the cache. `handleStart` ORs this
@@ -593,7 +601,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   const bindHost = !configuredHost || /^localhost$/i.test(configuredHost) ? "127.0.0.1" : configuredHost;
 
   // Unauthenticated loopback listener (#1102). Off unless explicitly enabled.
-  const loopbackListener = config.unauthenticatedLoopbackListener;
+  const loopbackListener = managementOnly ? undefined : config.unauthenticatedLoopbackListener;
   const loopbackListenerPort = loopbackListener?.enabled ? loopbackListener.port : null;
 
   /**
@@ -706,7 +714,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   // Re-probe here instead of trusting the earlier cache decision: startup work
   // between the two sites must not widen the service-install race.
   const nativeOwnership = inspectStartupOwnership(deps);
-  const nativeMainLifecycle: NativeMainStartupLifecycle = shouldSyncCodexOnStart(config)
+  const nativeMainLifecycle: NativeMainStartupLifecycle = !managementOnly && shouldSyncCodexOnStart(config)
     ? nativeOwnership.ownership === "owned"
       ? startNativeMainStartupLifecycle(deps.nativeMainStartup)
       : blockNativeMainStartupForUnownedServiceHome(
@@ -754,6 +762,16 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
       const policy: RequestPolicyView = requestServer === loopbackServer ? loopbackPolicy() : config;
       const url = new URL(req.url);
       markActivity(`${req.method} ${url.pathname}`);
+
+      // NexCode's listener transports management traffic only. Reject before
+      // WebSocket upgrade, authentication, logging, or a provider adapter runs.
+      if (managementOnly && (url.pathname === "/v1" || url.pathname.startsWith("/v1/"))) {
+        return formatErrorResponse(
+          404,
+          "not_found",
+          "NexCode is management-only; model requests must use Codex's native endpoint.",
+        );
+      }
 
       // Readiness is exact-GET on the literal /readyz path. Compare the DECODED
       // pathname so an encoded variant like /readyz%2F (which decodes to
@@ -827,6 +845,8 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
         const response = jsonResponse({
           status: "ok",
           service: "nexcode",
+          mode: managementOnly ? "management" : "proxy",
+          desktopBundleId,
           version: VERSION,
           uptime: process.uptime(),
           pid: process.pid,
@@ -1751,9 +1771,13 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   boundPort = actualPort;
   setCorsOrigin(actualPort);
 
-  console.log(`🚀 nexcode proxy running on http://localhost:${actualPort}`);
-  console.log(`   POST /v1/responses → provider translation`);
-  console.log(`   POST /v1/chat/completions → OpenAI-compatible clients`);
+  console.log(managementOnly
+    ? `NexCode management service running on http://localhost:${actualPort}`
+    : `🚀 nexcode proxy running on http://localhost:${actualPort}`);
+  if (!managementOnly) {
+    console.log(`   POST /v1/responses → provider translation`);
+    console.log(`   POST /v1/chat/completions → OpenAI-compatible clients`);
+  }
   console.log(`   GET  /healthz      → health check`);
   console.log(`   GET  /api/*        → management API`);
   console.log(`   GET  /             → GUI dashboard`);

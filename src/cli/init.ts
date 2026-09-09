@@ -4,6 +4,7 @@ import { injectCodexConfig } from "../codex/inject";
 import { classifyOpenAiTierBackup, getConfigPath, getDefaultConfig, isValidProviderName, preserveOpenAiTierRollbackSnapshot, saveConfig } from "../config";
 import { enrichProviderFromCatalog } from "../oauth/key-providers";
 import { deriveInitProviders } from "../providers/derive";
+import { isManagementOnlyRuntime } from "../product-mode";
 import type { NxcConfig, NxcProviderConfig } from "../types";
 
 function createPrompt(): { ask(question: string): Promise<string>; close(): void } {
@@ -88,6 +89,7 @@ export function cleanupOpenAiTierBackupAfterInit(configPath = getConfigPath()): 
 export async function runInit(): Promise<void> {
   const prompt = createPrompt();
   try {
+    const managementOnly = isManagementOnlyRuntime();
     console.log("\n🔧 nexcode (nxc) setup\n");
 
     const providers = buildInitProviders();
@@ -157,7 +159,7 @@ export async function runInit(): Promise<void> {
       };
     }
 
-    const portStr = await prompt.ask("\nProxy port [10100]: ");
+    const portStr = await prompt.ask(managementOnly ? "\nManagement API port [10100]: " : "\nProxy port [10100]: ");
     const port = parseInt(portStr, 10) || 10100;
 
     const config: NxcConfig = {
@@ -178,25 +180,31 @@ export async function runInit(): Promise<void> {
     console.log(`\n✅ Config saved to ~/.nexcode/config.json`);
     if (oauthHint) console.log(`🔐 Authenticate this provider with:  nxc login ${providerName}`);
 
-    const injectAnswer = await prompt.ask("Inject into Codex config.toml? [Y/n]: ");
-    if (injectAnswer.trim().toLowerCase() !== "n") {
-      console.log("Fetching available models from provider...");
-      const result = await injectCodexConfig(port, config);
-      console.log(result.success ? `✅ ${result.message}` : `⚠️  ${result.message}`);
-    }
+    if (managementOnly) {
+      console.log("Codex network settings were left unchanged; requests continue to use Codex's native endpoint.");
+    } else {
+      const injectAnswer = await prompt.ask("Inject into Codex config.toml? [Y/n]: ");
+      if (injectAnswer.trim().toLowerCase() !== "n") {
+        console.log("Fetching available models from provider...");
+        const result = await injectCodexConfig(port, config);
+        console.log(result.success ? `✅ ${result.message}` : `⚠️  ${result.message}`);
+      }
 
-    const shimAnswer = await prompt.ask("Install Codex autostart shim? [Y/n]: ");
-    if (shimAnswer.trim().toLowerCase() !== "n") {
-      try {
-        const { installCodexShim } = await import("../codex/shim");
-        const result = installCodexShim();
-        console.log(result.installed ? `✅ ${result.message}` : `⚠️  ${result.message}`);
-      } catch (err) {
-        console.log(`⚠️  Codex autostart shim skipped: ${err instanceof Error ? err.message : String(err)}`);
+      const shimAnswer = await prompt.ask("Install Codex autostart shim? [Y/n]: ");
+      if (shimAnswer.trim().toLowerCase() !== "n") {
+        try {
+          const { installCodexShim } = await import("../codex/shim");
+          const result = installCodexShim();
+          console.log(result.installed ? `✅ ${result.message}` : `⚠️  ${result.message}`);
+        } catch (err) {
+          console.log(`⚠️  Codex autostart shim skipped: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }
 
-    console.log(`\n🚀 Setup complete! Run 'nxc start' to start the proxy.`);
+    console.log(managementOnly
+      ? `\n🚀 Setup complete! Run 'nxc start' to start the management service.`
+      : `\n🚀 Setup complete! Run 'nxc start' to start the management service.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (/stdin (closed|reached EOF)/i.test(message)) {

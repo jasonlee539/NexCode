@@ -61,7 +61,7 @@ describe("CLI subcommand help", () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("Usage: nxc start [--port <port>]");
-    expect(result.stdout).toContain("Start the proxy server and sync models to Codex.");
+    expect(result.stdout).toContain("Start the local management service.");
   });
 
   test("top-level help counts every export client and export help names them", () => {
@@ -161,7 +161,7 @@ describe("CLI subcommand help", () => {
 
       expectSpawnFinished(result, "nxc status");
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("Proxy:");
+      expect(result.stdout).toContain("Management service:");
       expect(result.stdout).toContain("Health: http://127.0.0.1:9/healthz");
       expect(result.stdout).toContain("Dashboard: http://localhost:9/");
       expect(result.stdout).toContain(`Config: ${configPath}`);
