@@ -17,6 +17,7 @@ find_bun() {
   local candidate
   for candidate in \
     "$ROOT_DIR/node_modules/bun/bin/bun" \
+    "$ROOT_DIR/node_modules/bun/bin/bun.exe" \
     "$ROOT_DIR/node_modules/.bin/bun" \
     "$(command -v bun 2>/dev/null || true)"; do
     if [[ -n "$candidate" && -x "$candidate" ]]; then

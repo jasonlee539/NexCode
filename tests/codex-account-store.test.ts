@@ -240,20 +240,31 @@ describe("codex-account-store CRUD", () => {
       saveCodexAccountCredential,
       refreshGrantFingerprintForToken,
     } = await import("../src/codex/account-store");
-    saveCodexAccountCredential("refresh-success", { accessToken: "old", refreshToken: "old-r", expiresAt: 0, chatgptAccountId: "acc" });
+    saveCodexAccountCredential("refresh-success", {
+      idToken: "old-id",
+      accessToken: "old",
+      refreshToken: "old-r",
+      expiresAt: 0,
+      chatgptAccountId: "acc",
+    });
     const startGeneration = readCodexAccountRecord("refresh-success")!.generation;
     const startFingerprint = readCodexAccountRecord("refresh-success")!.refreshGrantFingerprint;
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(JSON.stringify({
       access_token: "new",
       refresh_token: "new-r",
+      id_token: "new-id",
       expires_in: 3600,
     }), { status: 200 })) as typeof fetch;
 
     try {
       const result = await getValidCodexToken("refresh-success");
       expect(result).toEqual({ accessToken: "new", chatgptAccountId: "acc", generation: startGeneration + 1 });
-      expect(getCodexAccountCredential("refresh-success")).toMatchObject({ accessToken: "new", refreshToken: "new-r" });
+      expect(getCodexAccountCredential("refresh-success")).toMatchObject({
+        idToken: "new-id",
+        accessToken: "new",
+        refreshToken: "new-r",
+      });
       expect(readCodexAccountRecord("refresh-success")!.refreshGrantFingerprint).not.toBe(startFingerprint);
       expect(readCodexAccountRecord("refresh-success")!.refreshGrantFingerprint).toBe(refreshGrantFingerprintForToken("new-r"));
     } finally {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isNexCodeDesktopApp } from "../src/desktop-app";
+import { isNexCodeDesktopApp, isNexCodeNativeAccountApp } from "../src/desktop-app";
 
 describe("desktop app detection", () => {
   test("recognizes the native WebView user agent", () => {
@@ -15,5 +15,12 @@ describe("desktop app detection", () => {
 
   test("keeps the regular browser dashboard in full mode", () => {
     expect(isNexCodeDesktopApp({ search: "", userAgent: "Mozilla/5.0" })).toBe(false);
+  });
+
+  test("enables native login switching in packaged macOS and Ubuntu apps only", () => {
+    expect(isNexCodeNativeAccountApp({ search: "?desktop=1&platform=macos" })).toBe(true);
+    expect(isNexCodeNativeAccountApp({ search: "?desktop=1&platform=ubuntu" })).toBe(true);
+    expect(isNexCodeNativeAccountApp({ search: "?desktop=1" })).toBe(false);
+    expect(isNexCodeNativeAccountApp({ search: "?platform=macos", userAgent: "browser" })).toBe(false);
   });
 });

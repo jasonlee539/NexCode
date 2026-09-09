@@ -64,6 +64,26 @@ describe("CLI subcommand help", () => {
     expect(result.stdout).toContain("Start the proxy server and sync models to Codex.");
   });
 
+  test("management-only help names the local management service instead of a proxy", () => {
+    const env = { NEXCODE_MANAGEMENT_ONLY: "1" };
+    const topLevel = runCli([], env);
+    expectSpawnFinished(topLevel, "management-only nxc help");
+    expect(topLevel.status).toBe(0);
+    expect(topLevel.stdout).toContain("Local Codex management tool");
+    expect(topLevel.stdout).toContain("Start the local management service");
+    expect(topLevel.stdout).toContain("Restart the local management service");
+
+    const start = runCli(["help", "start"], env);
+    expectSpawnFinished(start, "management-only nxc help start");
+    expect(start.status).toBe(0);
+    expect(start.stdout).toContain("Start the local NexCode management service. Codex requests remain direct.");
+
+    const restart = runCli(["help", "restart"], env);
+    expectSpawnFinished(restart, "management-only nxc help restart");
+    expect(restart.status).toBe(0);
+    expect(restart.stdout).toContain("Restart the local NexCode management service in the background.");
+  });
+
   test("top-level help counts every export client and export help names them", () => {
     const topLevel = runCli([]);
     expectSpawnFinished(topLevel, "nxc help");

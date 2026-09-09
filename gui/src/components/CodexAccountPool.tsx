@@ -25,6 +25,7 @@ import DesktopAccountGrid from "./DesktopAccountGrid";
 import { codexAccountDisplayLabel } from "../codex-account-display";
 import { useKeyedClientResource } from "../client-resource";
 import type { DesktopUsageResponse } from "../desktop-types";
+import { isNexCodeNativeAccountApp } from "../desktop-app";
 
 // Single definition lives with the controller that owns this data (WP3).
 export type { CodexAccountEntry } from "../hooks/useCodexAccountPool";
@@ -82,6 +83,7 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
     { enabled: simple, staleAfterMs: 15_000, deadlineMs: 45_000 },
   );
   const [confirm, setConfirm] = useState<CodexAccountEntry | null>(null);
+  const [nativeSwitchBusy, setNativeSwitchBusy] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [reauthId, setReauthId] = useState<string | null>(null);
@@ -173,25 +175,53 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
   }, [closeAddModal, controller, showActionFeedback, t]);
 
   const setActive = async (id: string | null) => {
-    const result = await controller.switchAccount(id);
-    if (!result.ok) {
-      if (result.reason === "busy") return;
+    const nativeLoginSwitch = isNexCodeNativeAccountApp();
+    setNativeSwitchBusy(nativeLoginSwitch);
+    try {
+      if (nativeLoginSwitch) {
+        const stopped = await fetch(`${apiBase}/api/desktop/codex/force-quit`, { method: "POST" });
+        if (!stopped.ok) {
+          showActionFeedback(t("codexAuth.switchFailed"), "err");
+          return;
+        }
+        const outcome = await stopped.json().catch(() => ({})) as {
+          ok?: boolean;
+          error?: string;
+          surviving?: number;
+          failed?: number;
+        };
+        if (outcome.ok !== true || outcome.error
+          || (outcome.surviving ?? 0) > 0 || (outcome.failed ?? 0) > 0) {
+          showActionFeedback(t("codexAuth.switchFailed"), "err");
+          return;
+        }
+      }
+      const result = await controller.switchAccount(id);
+      if (!result.ok) {
+        if (result.reason === "busy") return;
+        showActionFeedback(t("codexAuth.switchFailed"), "err");
+        return;
+      }
+      setConfirm(null);
+      const selectedId = result.activeId;
+      const selectedAccount = selectedId && selectedId !== "__main__"
+        ? accounts.find(account => account.id === selectedId)
+        : accounts.find(account => account.isMain);
+      const label = selectedAccount
+        ? codexAccountDisplayLabel(accounts, selectedAccount, t)
+        : selectedId && selectedId !== "__main__"
+          ? t("pws.accountOrdinal", { count: "1" })
+          : t("codexAuth.mainAccount");
+      showActionFeedback(nativeLoginSwitch
+        ? t("codexAuth.nativeSwitched", { email: label })
+        : accountModeState === "direct"
+          ? t("codexAuth.poolPreparedToast", { email: label })
+          : t("codexAuth.switched", { email: label }));
+    } catch {
       showActionFeedback(t("codexAuth.switchFailed"), "err");
-      return;
+    } finally {
+      setNativeSwitchBusy(false);
     }
-    setConfirm(null);
-    const selectedId = result.activeId;
-    const selectedAccount = selectedId && selectedId !== "__main__"
-      ? accounts.find(account => account.id === selectedId)
-      : accounts.find(account => account.isMain);
-    const label = selectedAccount
-      ? codexAccountDisplayLabel(accounts, selectedAccount, t)
-      : selectedId && selectedId !== "__main__"
-        ? t("pws.accountOrdinal", { count: "1" })
-        : t("codexAuth.mainAccount");
-    showActionFeedback(accountModeState === "direct"
-      ? t("codexAuth.poolPreparedToast", { email: label })
-      : t("codexAuth.switched", { email: label }));
   };
 
   const editAlias = async (account: CodexAccountEntry) => {
@@ -471,7 +501,8 @@ export default function CodexAccountPool({ apiBase, accountModeState = null, ban
           confirm={confirm}
           accountLabel={codexAccountDisplayLabel(accounts, confirm, t)}
           accountModeState={accountModeState}
-          switchingId={switchingId}
+          nativeLoginSwitch={isNexCodeNativeAccountApp()}
+          switchingId={nativeSwitchBusy ? confirm.id : switchingId}
           orderBusy={priorityUpdatingId !== null}
           onCancel={() => setConfirm(null)}
           onConfirm={() => { void setActive(confirm.id === "__main__" ? "__main__" : confirm.id); }}

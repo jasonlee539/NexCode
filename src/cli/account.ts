@@ -256,9 +256,17 @@ async function cmdUse(rest: string[], deps: AccountDeps): Promise<number> {
   if (res.status === 0) return proxyUnreachable();
   if (res.status !== 200) return apiError(res.json, `failed to switch ${name}`);
 
-  if (wantsJson) console.log(JSON.stringify({ ok: true, provider: name, type: c.type, activeId }, null, 2));
+  const nativeLogin = c.type === "codex" && res.json.nativeLogin === true;
+  if (c.type === "codex" && typeof res.json.activeCodexAccountId === "string") {
+    activeId = res.json.activeCodexAccountId;
+  }
+  if (wantsJson) console.log(JSON.stringify({ ok: true, provider: name, type: c.type, activeId, ...(nativeLogin ? { nativeLogin: true } : {}) }, null, 2));
   else console.log(`${name}: active ${c.type === "api-key" ? "key" : "account"} is now ${displayId(activeId)}`);
   if (c.type === "codex") {
+    if (nativeLogin) {
+      console.error("Codex native login changed. Reopen Codex CLI/App to use this account; model requests remain direct to OpenAI.");
+      return 0;
+    }
     console.error("Takes effect immediately; running threads move on their next request, and in-flight requests keep the account they captured.");
     const active = await apiJson(deps, baseUrl, "GET", "/api/codex-auth/active");
     if (active.status === 200 && typeof active.json.autoSwitchThreshold === "number" && active.json.autoSwitchThreshold > 0) {

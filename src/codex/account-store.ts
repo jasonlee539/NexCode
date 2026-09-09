@@ -41,6 +41,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isCredential(value: unknown): value is CodexAccountCredentials {
   return isObject(value)
+    && (value.idToken === undefined || typeof value.idToken === "string")
     && typeof value.accessToken === "string"
     && typeof value.refreshToken === "string"
     && typeof value.expiresAt === "number"
@@ -505,7 +506,12 @@ export async function getValidCodexToken(id: string): Promise<CodexTokenResult> 
         : "unknown" as const;
       throw new TokenRefreshError(reason, `Codex token refresh failed (${reason}); reauthenticate the account.`);
     }
-    const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
+    const data = (await res.json()) as {
+      access_token: string;
+      refresh_token?: string;
+      id_token?: unknown;
+      expires_in: number;
+    };
     // Guard against a missing/non-finite/negative expires_in (malformed upstream
     // response): a NaN expiry would never compare as expired, and a negative
     // duration would stamp an already-past expiry — both block refresh semantics.
@@ -519,6 +525,11 @@ export async function getValidCodexToken(id: string): Promise<CodexTokenResult> 
     const safeExpiresAt = Number.isFinite(expiresAt) ? expiresAt : Date.now() + 3600 * 1000;
 
     const updated: CodexAccountCredentials = {
+      ...(typeof data.id_token === "string" && data.id_token.length > 0
+        ? { idToken: data.id_token }
+        : lockedCred.idToken
+          ? { idToken: lockedCred.idToken }
+          : {}),
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? lockedCred.refreshToken,
       expiresAt: safeExpiresAt,

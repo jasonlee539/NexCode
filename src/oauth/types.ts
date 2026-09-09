@@ -13,6 +13,8 @@ export interface KiroOAuthMetadata {
 export type OAuthCredentials = {
   refresh: string;
   access: string;
+  /** OpenID identity token; kept only in protected credential stores. */
+  idToken?: string;
   /** Epoch ms after any small provider-specific early-refresh margin; the shared gate adds 1 minute. */
   expires: number;
   email?: string;

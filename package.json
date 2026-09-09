@@ -60,6 +60,7 @@
     "setup:hooks": "bun scripts/setup-hooks.ts",
     "desktop:build": "bash desktop/scripts/build-app.sh",
     "desktop:dmg": "bash desktop/scripts/build-dmg.sh",
+    "desktop:portable": "bash desktop/scripts/build-portable.sh",
     "desktop:open": "open dist/NexCode.app"
   },
   "dependencies": {

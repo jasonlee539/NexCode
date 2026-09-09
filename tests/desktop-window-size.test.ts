@@ -19,3 +19,11 @@ test("macOS desktop keeps a status item whose full quit stops the bundled runtim
   expect(source).toContain('stopper.arguments = [bundled.cli.path, "stop"]');
   expect(source).toContain("runtime.stop { NSApp.reply(toApplicationShouldTerminate: true) }");
 });
+
+test("macOS desktop starts only the management runtime and enables native account switching", async () => {
+  const source = await Bun.file(new URL("../desktop/macos/Sources/NexCodeApp.swift", import.meta.url)).text();
+  expect(source).toContain('environment["NEXCODE_MANAGEMENT_ONLY"] = "1"');
+  expect(source).toContain('URLQueryItem(name: "platform", value: "macos")');
+  expect(source).toContain('healthCheck(candidate) == "management"');
+  expect(source).toContain("hasHealthyNonManagementRuntime()");
+});

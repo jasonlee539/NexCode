@@ -1520,8 +1520,10 @@ export const en = {
   "codexAuth.poolPreparedToast": "{email} is prepared for Pool mode",
   "codexAuth.switchTitle": "Switch active account?",
   "codexAuth.switchDesc": "Takes effect immediately. Existing account-affine threads and requests already in flight keep their captured account; new or unbound requests use the selected account's order tier, and accounts at the same selection order still take turns.",
+  "codexAuth.nativeSwitchDesc": "NexCode will close running Codex processes, replace the native Codex login, and keep model requests connected directly to OpenAI. Reopen Codex after switching.",
   "codexAuth.cacheWarning": "Prompt cache resets on account switch. New session starts with empty cache.",
   "codexAuth.setAsNext": "Use this account next",
+  "codexAuth.nativeSwitchAction": "Switch native login",
   "codexAuth.cancel": "Cancel",
   "codexAuth.switchBack": "Switch back to Main?",
   "codexAuth.switchBackDesc": "Takes effect immediately. Existing account-affine threads and requests already in flight keep their captured account; new or unbound requests use your App login account's order tier, and accounts at the same selection order still take turns.",
@@ -1606,6 +1608,7 @@ export const en = {
   "accountPool.priorityUpdateFailed": "Selection order for {email} could not be saved. The last confirmed value is shown.",
 
   "codexAuth.switched": "{email} is selected for the next request",
+  "codexAuth.nativeSwitched": "{email} is now the native Codex login. Reopen Codex to use it.",
   "codexAuth.loadFailed": "Codex account settings could not be loaded.",
   "codexAuth.switchFailed": "The account could not be switched. Your previous selection is unchanged.",
   "codexAuth.removeConfirm": "Remove {id}?",

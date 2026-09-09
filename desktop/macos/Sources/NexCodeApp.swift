@@ -66,6 +66,41 @@ private final class RuntimeController {
                 return
             }
 
+            // An upgrade may leave the former proxy-capable runtime alive. Stop
+            // that NexCode-owned process before starting the management-only
+            // listener so the desktop app can never attach to a model relay.
+            if self.hasHealthyNonManagementRuntime() {
+                let stopper = Process()
+                stopper.executableURL = bundled.bun
+                stopper.arguments = [bundled.cli.path, "stop"]
+                stopper.currentDirectoryURL = bundled.root
+                stopper.standardInput = FileHandle.nullDevice
+                stopper.standardOutput = FileHandle.nullDevice
+                stopper.standardError = FileHandle.nullDevice
+                var stopEnvironment = self.desktopRuntimeEnvironment()
+                stopEnvironment["NEXCODE_DESKTOP_APP"] = "1"
+                stopEnvironment["NEXCODE_MANAGEMENT_ONLY"] = "1"
+                stopEnvironment["NXC_BUN_RUNTIME_SOURCE"] = "bundled"
+                stopEnvironment["NXC_BUN_RUNTIME_PATH"] = bundled.bun.path
+                stopEnvironment["PATH"] = self.desktopPath(stopEnvironment["PATH"])
+                stopper.environment = stopEnvironment
+                do {
+                    try stopper.run()
+                    let deadline = Date().addingTimeInterval(25)
+                    while stopper.isRunning && Date() < deadline {
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
+                    if stopper.isRunning { stopper.terminate() }
+                } catch {
+                    self.deliverFailure("无法关闭旧版 NexCode 运行时：\(error.localizedDescription)")
+                    return
+                }
+                if self.hasHealthyNonManagementRuntime() {
+                    self.deliverFailure("旧版 NexCode 代理仍在运行，请完全退出后重试。")
+                    return
+                }
+            }
+
             let child = Process()
             child.executableURL = bundled.bun
             child.arguments = [bundled.cli.path, "start"]
@@ -74,6 +109,7 @@ private final class RuntimeController {
 
             var environment = self.desktopRuntimeEnvironment()
             environment["NEXCODE_DESKTOP_APP"] = "1"
+            environment["NEXCODE_MANAGEMENT_ONLY"] = "1"
             environment["NXC_BUN_RUNTIME_SOURCE"] = "bundled"
             environment["NXC_BUN_RUNTIME_PATH"] = bundled.bun.path
             environment["PATH"] = self.desktopPath(environment["PATH"])
@@ -103,7 +139,7 @@ private final class RuntimeController {
                     }
                     let detail = self.currentLogTail()
                     let suffix = detail.isEmpty ? "" : "\n\n最近的运行日志：\n\(detail)"
-                    self.deliverFailure("NexCode 代理已退出（状态码 \(process.terminationStatus)）。\(suffix)")
+                    self.deliverFailure("NexCode 管理服务已退出（状态码 \(process.terminationStatus)）。\(suffix)")
                 }
             }
 
@@ -128,7 +164,7 @@ private final class RuntimeController {
             if child.isRunning { child.terminate() }
             let detail = self.currentLogTail()
             let suffix = detail.isEmpty ? "" : "\n\n最近的运行日志：\n\(detail)"
-            self.deliverFailure("本地代理未能在 30 秒内就绪。\(suffix)")
+            self.deliverFailure("本地管理服务未能在 30 秒内就绪。\(suffix)")
         }
     }
 
@@ -157,6 +193,7 @@ private final class RuntimeController {
                 stopper.standardError = FileHandle.nullDevice
                 var environment = self.desktopRuntimeEnvironment()
                 environment["NEXCODE_DESKTOP_APP"] = "1"
+                environment["NEXCODE_MANAGEMENT_ONLY"] = "1"
                 environment["NXC_BUN_RUNTIME_SOURCE"] = "bundled"
                 environment["NXC_BUN_RUNTIME_PATH"] = bundled.bun.path
                 environment["PATH"] = self.desktopPath(environment["PATH"])
@@ -349,11 +386,29 @@ private final class RuntimeController {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
             for candidate in runtimeCandidates() {
-                if healthCheck(candidate.url) { return candidate.url }
+                if healthCheck(candidate) == "management" {
+                    return desktopDashboardURL(candidate.url)
+                }
             }
             Thread.sleep(forTimeInterval: 0.18)
         } while Date() < deadline
         return nil
+    }
+
+    private func hasHealthyNonManagementRuntime() -> Bool {
+        runtimeCandidates().contains { candidate in
+            guard let mode = healthCheck(candidate) else { return false }
+            return mode != "management"
+        }
+    }
+
+    private func desktopDashboardURL(_ baseURL: URL) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { return baseURL }
+        components.queryItems = [
+            URLQueryItem(name: "desktop", value: "1"),
+            URLQueryItem(name: "platform", value: "macos"),
+        ]
+        return components.url ?? baseURL
     }
 
     private func runtimeCandidates() -> [(url: URL, pid: Int?)] {
@@ -390,27 +445,29 @@ private final class RuntimeController {
         return value
     }
 
-    private func healthCheck(_ dashboardURL: URL) -> Bool {
-        guard let healthURL = URL(string: "healthz", relativeTo: dashboardURL)?.absoluteURL else { return false }
+    private func healthCheck(_ candidate: (url: URL, pid: Int?)) -> String? {
+        guard let healthURL = URL(string: "healthz", relativeTo: candidate.url)?.absoluteURL else { return nil }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 0.75
         configuration.timeoutIntervalForResource = 0.9
         let session = URLSession(configuration: configuration)
         let semaphore = DispatchSemaphore(value: 0)
-        var healthy = false
+        var runtimeMode: String?
         let task = session.dataTask(with: healthURL) { data, response, _ in
             defer { semaphore.signal() }
             guard let http = response as? HTTPURLResponse,
                   http.statusCode == 200,
                   let data,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-            healthy = (object["service"] as? String)?.lowercased() == "nexcode"
-                && (object["status"] as? String) == "ok"
+            guard (object["service"] as? String)?.lowercased() == "nexcode",
+                  (object["status"] as? String) == "ok" else { return }
+            if let expectedPID = candidate.pid, (object["pid"] as? Int) != expectedPID { return }
+            runtimeMode = object["runtimeMode"] as? String ?? "legacy-proxy"
         }
         task.resume()
         if semaphore.wait(timeout: .now() + 1) == .timedOut { task.cancel() }
         session.invalidateAndCancel()
-        return healthy
+        return runtimeMode
     }
 
     private func deliverReady(_ url: URL) {
@@ -428,7 +485,7 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
     private let webView: WKWebView
     private let loadingView = NSVisualEffectView()
     private let statusLabel = NSTextField(labelWithString: "正在启动 NexCode")
-    private let detailLabel = NSTextField(wrappingLabelWithString: "正在准备本地 AI 路由工作区…")
+    private let detailLabel = NSTextField(wrappingLabelWithString: "正在准备 Codex 管理工作区…")
     private let progress = NSProgressIndicator()
     private let retryButton = NSButton(title: "重新启动", target: nil, action: nil)
     private var dashboardURL: URL?
@@ -459,7 +516,7 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
 
     func showLoading(stopping: Bool = false) {
         statusLabel.stringValue = stopping ? "正在安全退出 NexCode" : "正在启动 NexCode"
-        detailLabel.stringValue = stopping ? "正在恢复客户端配置并关闭本地代理…" : "正在准备本地 AI 路由工作区…"
+        detailLabel.stringValue = stopping ? "正在关闭本地管理服务…" : "正在准备 Codex 管理工作区…"
         retryButton.isHidden = true
         progress.isHidden = false
         progress.startAnimation(nil)
@@ -832,8 +889,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "NexCode",
             .applicationVersion: "1.0.0",
-            .version: "Local AI Router",
-            .credits: NSAttributedString(string: "Independent desktop AI routing software.\nOpenCodex-derived portions are available under the MIT License."),
+            .version: "Codex Manager",
+            .credits: NSAttributedString(string: "Local Codex account and workspace manager. Model requests connect directly to OpenAI.\nOpenCodex-derived portions are available under the MIT License."),
         ])
     }
 

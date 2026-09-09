@@ -23,7 +23,8 @@
 
 NexCode 是一款面向 Codex 用户的原生 macOS 桌面软件。它把分散在本机文件、
 数据库和命令行中的账号、对话线程、Token 用量与 Skills 汇总到一个清晰的管理界面中，
-并随应用启动所需的本地运行环境。
+并随应用启动所需的本地管理环境。模型请求始终由 Codex 直接连接 OpenAI，
+不会经过 NexCode 的本地端口。
 
 日常使用不需要打开浏览器，也不需要手动查找 Codex 的本地数据文件。除登录授权外，
 账号管理、线程查看、用量统计、Skills 管理和维护操作都可以直接在 NexCode 中完成。
@@ -34,7 +35,7 @@ NexCode 是一款面向 Codex 用户的原生 macOS 桌面软件。它把分散�
 
 - 连接并集中管理多个 ChatGPT / Codex 账号。
 - 查看账号状态、套餐信息和可用配额。
-- 选择新会话要使用的活动账号，无需反复修改本地配置。
+- 切换账号时会关闭运行中的 Codex、原子替换原生登录并保留旧账号，重新打开 Codex 后即可使用。
 - 登录凭据与运行数据保存在本机 `~/.nexcode`，也可通过 `NEXCODE_HOME` 更改目录。
 
 #### 2. 本地线程中心
@@ -74,13 +75,13 @@ NexCode 是一款面向 Codex 用户的原生 macOS 桌面软件。它把分散�
 - 使用 WebKit 提供独立原生窗口，不把管理界面跳转到浏览器。
 - 自动启动内置运行环境并发现可用的本地端口。
 - OAuth 登录在系统浏览器中完成，随后通过 `nexcode://` 自动返回应用。
-- 提供独立 `.app` 与可拖入“应用程序”目录的 `.dmg` 安装镜像。
+- 提供独立 `.app`、可拖入“应用程序”目录的 `.dmg`，以及免安装便携版 ZIP。
 
 ### 数据范围
 
 NexCode 的线程和用量页面只读取本机 Codex 记录。软件不会把没有归属信息的 Token
-重复分摊到各账号，也不会把缺失统计当作零。模型请求仍会按你的账号和配置发送到
-相应的上游服务；使用第三方服务前，请确认其当前条款允许相应的接入方式。
+重复分摊到各账号，也不会把缺失统计当作零。桌面运行环境只提供管理页面和管理 API，
+不开放模型转发端点；模型请求由 Codex 使用当前原生登录直接发送到 OpenAI。
 
 ### 安装与构建
 
@@ -101,7 +102,13 @@ open dist/NexCode.app
 npm run desktop:dmg
 ```
 
-安装镜像将写入 `dist/NexCode.dmg`。应用包内已包含 Bun、代理源码、生产版管理界面
+安装镜像将写入 `dist/NexCode.dmg`。免安装便携版可通过下列命令生成：
+
+```bash
+npm run desktop:portable
+```
+
+便携版将写入 `dist/NexCode-portable-macos-arm64.zip`。应用包内已包含 Bun、运行时源码、生产版管理界面
 和运行依赖，移出源码目录后仍可独立运行。
 
 ---
@@ -111,7 +118,9 @@ npm run desktop:dmg
 NexCode is a native macOS desktop app for Codex users. It brings accounts,
 conversation threads, token usage, and Skills—normally spread across local
 files, databases, and command-line tools—into one focused interface. The app
-also starts the local runtime required for its Codex integration.
+also starts the local management runtime required for its Codex integration.
+Model requests continue to connect directly from Codex to OpenAI and never pass
+through NexCode's local port.
 
 There is no browser dashboard to keep open and no need to locate Codex data
 files manually. Apart from browser-based sign-in, account management, thread
@@ -124,7 +133,7 @@ inside NexCode.
 
 - Connect and manage multiple ChatGPT / Codex accounts in one place.
 - Review account status, plan information, and available quota.
-- Choose the active account for new sessions without repeatedly editing local configuration.
+- Switch the native Codex login atomically after closing running Codex processes, while retaining the previous account for later use.
 - Keep credentials and runtime data under `~/.nexcode`, or set `NEXCODE_HOME` to use another directory.
 
 #### 2. Local thread library
@@ -164,15 +173,14 @@ inside NexCode.
 - Run in a dedicated native WebKit window instead of redirecting the dashboard to a browser.
 - Start the bundled runtime and discover an available local port automatically.
 - Complete OAuth in the system browser and return to the app through the `nexcode://` protocol.
-- Use NexCode as a standalone `.app` or install it from a drag-to-Applications `.dmg` image.
+- Use NexCode as a standalone `.app`, install it from a `.dmg`, or extract the portable ZIP without installation.
 
 ### Data scope
 
 The thread and usage views read local Codex records only. NexCode does not
 duplicate unattributed token totals across accounts or represent missing usage
-as zero. Model requests still go to the appropriate upstream service according
-to your account and configuration. Review a third-party service's current terms
-before connecting it.
+as zero. The desktop runtime serves only the management UI and API; Codex sends
+model requests directly to OpenAI with the active native login.
 
 ### Install and build
 
@@ -195,15 +203,16 @@ drag-to-Applications installer image, run:
 npm run desktop:dmg
 ```
 
-The installer is written to `dist/NexCode.dmg`. The app bundles Bun, the proxy
-source, the production dashboard, and runtime dependencies, so it remains
+The installer is written to `dist/NexCode.dmg`. To build the portable archive, run
+`npm run desktop:portable`; it writes `dist/NexCode-portable-macos-arm64.zip`.
+The app bundles Bun, the runtime source, the production dashboard, and runtime dependencies, so it remains
 self-contained after being moved out of the source directory.
 
 ---
 
 ## Project structure / 项目结构
 
-- `desktop/` — native macOS host, branding assets, and `.app` / `.dmg` packaging scripts
+- `desktop/` — native macOS host, branding assets, and `.app` / `.dmg` / portable ZIP packaging scripts
 - `gui/` — React + Vite desktop interface
 - `src/` — Bun TypeScript runtime, Codex integration, and management API
 - `tests/` — runtime and GUI regression tests
