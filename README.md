@@ -5,8 +5,8 @@
 <h1 align="center">NexCode</h1>
 
 <p align="center">
-  <strong>在一个 macOS 桌面应用里，管理 Codex 账号、线程、用量与 Skills。</strong><br>
-  <strong>Manage Codex accounts, threads, usage, and Skills in one macOS desktop app.</strong>
+  <strong>在 macOS、Windows 和 Ubuntu 上管理 Codex 账号、线程、用量与 Skills。</strong><br>
+  <strong>Manage Codex accounts, threads, usage, and Skills on macOS, Windows, and Ubuntu.</strong>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 
 ## 中文
 
-NexCode 是一款面向 Codex 用户的原生 macOS 桌面软件。它把分散在本机文件、
+NexCode 是一款面向 Codex 用户的跨平台桌面软件。它把分散在本机文件、
 数据库和命令行中的账号、对话线程、Token 用量与 Skills 汇总到一个清晰的管理界面中，
 并随应用启动所需的本地管理环境。模型请求始终由 Codex 直接连接 OpenAI，
 不会经过 NexCode 的本地端口。
@@ -70,12 +70,12 @@ NexCode 是一款面向 Codex 用户的原生 macOS 桌面软件。它把分散�
 - 修复启动器、模型目录、运行缓存及可识别的第三方代理配置冲突。
 - 清理冗余认证备份、旧目录备份和失效快照，同时保留当前认证与活动数据。
 
-#### 6. 原生 macOS 使用体验
+#### 6. 跨平台桌面体验
 
-- 使用 WebKit 提供独立原生窗口，不把管理界面跳转到浏览器。
+- 在 macOS、Windows 和 Ubuntu 上提供独立桌面窗口，不必常驻浏览器页面。
 - 自动启动内置运行环境并发现可用的本地端口。
-- OAuth 登录在系统浏览器中完成，随后通过 `nexcode://` 自动返回应用。
-- 提供独立 `.app`、可拖入“应用程序”目录的 `.dmg`，以及免安装便携版 ZIP。
+- OAuth 登录在系统浏览器中完成，随后自动返回应用。
+- 提供 macOS DMG 和便携 ZIP、Windows Setup，以及 Ubuntu DEB 安装包。
 
 ### 数据范围
 
@@ -83,10 +83,17 @@ NexCode 的线程和用量页面只读取本机 Codex 记录。软件不会把�
 重复分摊到各账号，也不会把缺失统计当作零。桌面运行环境只提供管理页面和管理 API，
 不开放模型转发端点；模型请求由 Codex 使用当前原生登录直接发送到 OpenAI。
 
-### 安装与构建
+### 下载与安装
 
-macOS 用户可从 [Releases](https://github.com/jasonlee539/NexCode/releases)
-获取已发布的应用。
+| 平台 | 架构 | 下载 | 安装方式 |
+| --- | --- | --- | --- |
+| macOS 13+ | Apple Silicon（arm64） | [DMG 安装版](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode.dmg) · [便携 ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-portable-macos-arm64.zip) | 打开 DMG 并拖入“应用程序”，或解压 ZIP 后直接运行 |
+| Windows | x64 | [Setup EXE](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-Setup-1.0.0-x64.exe) | 运行安装程序并按提示完成安装 |
+| Ubuntu 22.04+ | amd64 | [DEB 安装包](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/nexcode-ubuntu_1.0.0_amd64.deb) | 下载后运行 `sudo apt install ./nexcode-ubuntu_1.0.0_amd64.deb` |
+
+全部版本和更新记录见 [GitHub Releases](https://github.com/jasonlee539/NexCode/releases)。
+
+### 从源码构建 macOS 版
 
 从源码构建需要 macOS 13 或更高版本、Node.js 18+ 和 Apple Command Line Tools：
 
@@ -115,7 +122,7 @@ npm run desktop:portable
 
 ## English
 
-NexCode is a native macOS desktop app for Codex users. It brings accounts,
+NexCode is a cross-platform desktop app for Codex users. It brings accounts,
 conversation threads, token usage, and Skills—normally spread across local
 files, databases, and command-line tools—into one focused interface. The app
 also starts the local management runtime required for its Codex integration.
@@ -168,12 +175,12 @@ inside NexCode.
 - Repair launcher state, managed model catalogs, runtime caches, and recognized third-party proxy conflicts.
 - Remove redundant authentication backups, old directory backups, and stale snapshots while preserving current credentials and active data.
 
-#### 6. Native macOS experience
+#### 6. Cross-platform desktop experience
 
-- Run in a dedicated native WebKit window instead of redirecting the dashboard to a browser.
+- Run in a dedicated desktop window on macOS, Windows, or Ubuntu without keeping a browser page open.
 - Start the bundled runtime and discover an available local port automatically.
-- Complete OAuth in the system browser and return to the app through the `nexcode://` protocol.
-- Use NexCode as a standalone `.app`, install it from a `.dmg`, or extract the portable ZIP without installation.
+- Complete OAuth in the system browser and return to the app automatically.
+- Install from a macOS DMG, Windows Setup executable, or Ubuntu DEB, or use the portable macOS ZIP.
 
 ### Data scope
 
@@ -182,10 +189,17 @@ duplicate unattributed token totals across accounts or represent missing usage
 as zero. The desktop runtime serves only the management UI and API; Codex sends
 model requests directly to OpenAI with the active native login.
 
-### Install and build
+### Download and install
 
-macOS users can download published builds from
-[Releases](https://github.com/jasonlee539/NexCode/releases).
+| Platform | Architecture | Download | Installation |
+| --- | --- | --- | --- |
+| macOS 13+ | Apple Silicon (arm64) | [DMG](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode.dmg) · [Portable ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-portable-macos-arm64.zip) | Open the DMG and drag NexCode to Applications, or extract the ZIP and run the app |
+| Windows | x64 | [Setup EXE](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-Setup-1.0.0-x64.exe) | Run the installer and follow its prompts |
+| Ubuntu 22.04+ | amd64 | [DEB package](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/nexcode-ubuntu_1.0.0_amd64.deb) | Download, then run `sudo apt install ./nexcode-ubuntu_1.0.0_amd64.deb` |
+
+See [GitHub Releases](https://github.com/jasonlee539/NexCode/releases) for all builds and release notes.
+
+### Build the macOS edition from source
 
 Building from source requires macOS 13 or newer, Node.js 18+, and Apple Command
 Line Tools:
