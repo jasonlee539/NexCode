@@ -1,3 +1,5 @@
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
+
 export interface CliCommandEntry {
   name: string;
   aliases?: string[];
@@ -6,6 +8,8 @@ export interface CliCommandEntry {
   details?: string[];
   hidden?: boolean;
 }
+
+const managementOnly = isManagementOnlyRuntime();
 
 export const CLI_COMMANDS: CliCommandEntry[] = [
   {
@@ -20,8 +24,20 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
     usage: "nxc setup",
     summary: "Interactive setup for providers and Codex config injection (alias of init).",
   },
-  { name: "start", usage: "nxc start [--port <port>]", summary: "Start the proxy server and sync models to Codex." },
-  { name: "stop", usage: "nxc stop", summary: "Stop the proxy and restore native Codex config." },
+  {
+    name: "start",
+    usage: "nxc start [--port <port>]",
+    summary: managementOnly
+      ? "Start the local NexCode management service. Codex requests remain direct."
+      : "Start the proxy server and sync models to Codex.",
+  },
+  {
+    name: "stop",
+    usage: "nxc stop",
+    summary: managementOnly
+      ? "Stop the local NexCode management service."
+      : "Stop the proxy and restore native Codex config.",
+  },
   {
     name: "restore",
     aliases: ["eject"],
@@ -62,7 +78,7 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "service",
     usage: "nxc service [install|repair|restart|start|stop|status|uninstall|remove]",
-    summary: "Run as a background service.",
+    summary: managementOnly ? "Run NexCode management as a background service." : "Run as a background service.",
     details: [
       "With no subcommand, installs when absent or repairs/restarts an existing service.",
       "`restart` is an alias of `repair` and does not re-register an installed service.",
@@ -85,7 +101,13 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
       "--no-start (install only) installs the tray without launching it immediately.",
     ],
   },
-  { name: "ensure", usage: "nxc ensure", summary: "Ensure the proxy is running and Codex config/cache are current." },
+  {
+    name: "ensure",
+    usage: "nxc ensure",
+    summary: managementOnly
+      ? "Ensure the local NexCode management service is running."
+      : "Ensure the proxy is running and Codex config/cache are current.",
+  },
   {
     name: "sync",
     usage: "nxc sync [--restart-codex]",
@@ -104,7 +126,11 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
       "--restart-codex sends SIGTERM only to matching app-server / code-mode-host processes (may interrupt active turns).",
     ],
   },
-  { name: "status", usage: "nxc status", summary: "Check proxy server status." },
+  {
+    name: "status",
+    usage: "nxc status",
+    summary: managementOnly ? "Check NexCode management service status." : "Check proxy server status.",
+  },
   {
     name: "doctor",
     usage: "nxc doctor",
@@ -321,7 +347,9 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "restart",
     usage: "nxc restart",
-    summary: "Stop the proxy and restart it (background). Equivalent to stop + ensure.",
+    summary: managementOnly
+      ? "Restart the local NexCode management service in the background."
+      : "Stop the proxy and restart it (background). Equivalent to stop + ensure.",
   },
   {
     name: "v2",
@@ -339,7 +367,9 @@ export const CLI_COMMANDS: CliCommandEntry[] = [
   {
     name: "health",
     usage: "nxc health [--json]",
-    summary: "Check proxy health. Exits 0 if healthy, 1 otherwise.",
+    summary: managementOnly
+      ? "Check NexCode management service health. Exits 0 if healthy, 1 otherwise."
+      : "Check proxy health. Exits 0 if healthy, 1 otherwise.",
     details: ["Use --json for structured output: {ok, pid, port}."],
   },
   {

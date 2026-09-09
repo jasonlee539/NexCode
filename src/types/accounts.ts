@@ -19,6 +19,8 @@ export interface CodexAccount {
 }
 
 export interface CodexAccountCredentials {
+  /** Required when materializing this account as Codex's native auth.json login. */
+  idToken?: string;
   accessToken: string;
   refreshToken: string;
   expiresAt: number;

@@ -251,6 +251,7 @@ function normalizeCredential(cred: unknown): OAuthCredentials | null {
     refresh: candidate.refresh,
     expires: candidate.expires,
   };
+  if (typeof candidate.idToken === "string" && candidate.idToken.length > 0) normalized.idToken = candidate.idToken;
   if (typeof candidate.email === "string" && candidate.email.length > 0) normalized.email = candidate.email;
   if (typeof candidate.accountId === "string" && candidate.accountId.length > 0) normalized.accountId = candidate.accountId;
   if (isCredentialSource(candidate.source)) normalized.source = candidate.source;

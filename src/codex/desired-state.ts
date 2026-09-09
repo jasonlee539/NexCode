@@ -23,6 +23,7 @@
 import { loadConfig, mutatePersistedConfig } from "../config";
 import type { NxcClientIntegrationsConfig, NxcConfig } from "../types";
 import { runStartupReadinessSync, type ReadinessGate, type SyncOutcomeLike } from "../server/readiness";
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
 
 /** Clients whose durable intent this module owns. */
 export type DurableIntentClientId = keyof NxcClientIntegrationsConfig;
@@ -72,7 +73,7 @@ export function codexIntegrationEnabled(config: Pick<NxcConfig, "clientIntegrati
 
 /** Whether a Codex sync is permitted for this admitted config snapshot. */
 export function shouldSyncCodexOnStart(config: Pick<NxcConfig, "clientIntegrations">): boolean {
-  return codexIntegrationEnabled(config);
+  return !isManagementOnlyRuntime() && codexIntegrationEnabled(config);
 }
 
 /**

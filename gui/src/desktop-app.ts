@@ -12,3 +12,10 @@ export function isNexCodeDesktopApp(environment?: DesktopAppEnvironment): boolea
   return new URLSearchParams(search).get("desktop") === "1"
     || /(?:^|\s)NexCode\/\d/i.test(userAgent);
 }
+
+export function isNexCodeUbuntuApp(environment?: DesktopAppEnvironment): boolean {
+  const search = environment?.search
+    ?? (typeof window !== "undefined" ? window.location.search : "");
+  return isNexCodeDesktopApp(environment)
+    && new URLSearchParams(search).get("platform") === "ubuntu";
+}

@@ -199,6 +199,7 @@ import {
 import { SYSTEM_RESTART_CAPABILITY_VERSION } from "../lib/system-restart-contract";
 import { LOCAL_PROVIDER_RELOAD_CAPABILITY_VERSION } from "../lib/local-provider-reload-contract";
 import { createReadinessGate, type ReadinessGate } from "./readiness";
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
 
 export const MAX_WS_FRAME_BYTES = 50 * 1024 * 1024;
 const WEBSOCKET_IDLE_TIMEOUT_SECONDS = 0;
@@ -493,6 +494,7 @@ export function warnAgentTaskRecoveryStartup(config: {
 }
 
 export function startServer(port?: number, deps: StartServerDeps = {}): Server<WsData> {
+  const managementOnly = isManagementOnlyRuntime();
   const localAttestationSecret = deps.localAttestationSecret ?? createLocalAttestationSecret();
   const config = runModelRenameStartupMigration(runAlibabaRegionStartupMigration(runOpenAiTierStartupMigration(loadConfig())));
   warnAgentTaskRecoveryStartup(config);
@@ -546,7 +548,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   // home resolution and the acquisition can fail on a machine with no Codex home —
   // `getCodexHome()` THROWS when CODEX_HOME names a missing directory, which would
   // otherwise turn "no Codex installed" into "proxy will not start".
-  if (startupCacheOwnership.ownership === "owned") {
+  if (!managementOnly && startupCacheOwnership.ownership === "owned") {
     try {
       const startupCodexHome = getCodexHome();
       // #1046: record whether this actually rewrote the cache. `handleStart` ORs this
@@ -594,7 +596,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
 
   // Unauthenticated loopback listener (#1102). Off unless explicitly enabled.
   const loopbackListener = config.unauthenticatedLoopbackListener;
-  const loopbackListenerPort = loopbackListener?.enabled ? loopbackListener.port : null;
+  const loopbackListenerPort = !managementOnly && loopbackListener?.enabled ? loopbackListener.port : null;
 
   /**
    * Which listener a request arrived on, expressed as the only thing that differs: the bind
@@ -755,6 +757,17 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
       const url = new URL(req.url);
       markActivity(`${req.method} ${url.pathname}`);
 
+      // The Ubuntu management application has no model data plane. This guard
+      // runs before OPTIONS and WebSocket handling so no protocol variant can
+      // accidentally turn the management listener into a relay.
+      if (managementOnly && (url.pathname === "/v1" || url.pathname.startsWith("/v1/"))) {
+        return withCors(
+          formatErrorResponse(404, "not_found", "Model relay endpoints are disabled in management mode"),
+          req,
+          policy,
+        );
+      }
+
       // Readiness is exact-GET on the literal /readyz path. Compare the DECODED
       // pathname so an encoded variant like /readyz%2F (which decodes to
       // /readyz/) cannot bypass the exact-path rejection and reach the GUI
@@ -831,6 +844,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
           uptime: process.uptime(),
           pid: process.pid,
           port: healthPort,
+          runtimeMode: managementOnly ? "management" : "proxy",
           restartCapability: SYSTEM_RESTART_CAPABILITY_VERSION,
           providerReloadCapability: LOCAL_PROVIDER_RELOAD_CAPABILITY_VERSION,
         }, 200, req, policy);
@@ -1469,7 +1483,7 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
       const guiFile = serveGuiFile(url.pathname, undefined, guiSessionCandidate ?? undefined);
       if (guiFile) return guiFile;
       if (url.pathname === "/" && req.method === "GET") {
-        return jsonResponse(rootFallbackPayload());
+        return jsonResponse(rootFallbackPayload(managementOnly));
       }
 
       return withCors(formatErrorResponse(404, "not_found", `Unknown endpoint: ${req.method} ${url.pathname}`), req, config);
@@ -1751,9 +1765,15 @@ export function startServer(port?: number, deps: StartServerDeps = {}): Server<W
   boundPort = actualPort;
   setCorsOrigin(actualPort);
 
-  console.log(`🚀 nexcode proxy running on http://localhost:${actualPort}`);
-  console.log(`   POST /v1/responses → provider translation`);
-  console.log(`   POST /v1/chat/completions → OpenAI-compatible clients`);
+  console.log(
+    managementOnly
+      ? `🚀 NexCode management service running on http://localhost:${actualPort}`
+      : `🚀 nexcode proxy running on http://localhost:${actualPort}`,
+  );
+  if (!managementOnly) {
+    console.log(`   POST /v1/responses → provider translation`);
+    console.log(`   POST /v1/chat/completions → OpenAI-compatible clients`);
+  }
   console.log(`   GET  /healthz      → health check`);
   console.log(`   GET  /api/*        → management API`);
   console.log(`   GET  /             → GUI dashboard`);

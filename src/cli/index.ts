@@ -85,8 +85,22 @@ import { selfLaunchArgv } from "../lib/self-launch-argv";
 import { initializeNodeLauncherContext } from "./launcher-context";
 import { createLocalAttestationSecret } from "../lib/local-management-attestation";
 import { MEMORY_DRAIN_RESTART_MS, REPLACEMENT_READY_TIMEOUT_MS } from "../lib/system-restart-contract";
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
 
 initializeNodeLauncherContext();
+
+function enforceManagementOnlyClientState(): void {
+  if (!isManagementOnlyRuntime()) return;
+  const restored = restoreNativeCodex({ skipHistory: true });
+  if (!restored.success) {
+    throw new Error(`Could not remove NexCode routing from Codex: ${restored.message}`);
+  }
+  // Remove every client-side route NexCode may have installed previously. The
+  // HTTP listener remains available solely for the dashboard and management API.
+  revertSystemEnv();
+  reportShellHookFailure(reconcileShellHook(false));
+  try { stripGrokConfig(); } catch { /* best-effort cleanup of an optional client */ }
+}
 
 // Head: version/help early exits, `ready` pre-parse (exit 64 before any
 // preflight), and the bounded Codex-shim auto-restore preflight live in
@@ -220,6 +234,8 @@ async function handleStart(options: { block?: boolean } = {}) {
   // auth path reads NEXCODE_API_AUTH_TOKEN from the environment.
   const serviceToken = loadServiceTokenFromFile(process.env);
   if (serviceToken) process.env.NEXCODE_API_AUTH_TOKEN = serviceToken;
+  const managementOnly = isManagementOnlyRuntime();
+  enforceManagementOnlyClientState();
   const requestedPort = parsePortOption();
   const owner = await findProxyOwnerBeforeJournalRecovery();
   if (owner.live) {
@@ -231,10 +247,10 @@ async function handleStart(options: { block?: boolean } = {}) {
     // Only the exact "1" sentinel takes this path — the same check syncCleanup
     // uses — so an env value like "0" or "false" cannot bypass the conflict error.
     if (process.env.NXC_SERVICE === "1") {
-      console.log(`Proxy already running (PID ${owner.live.pid ?? owner.pidSnapshot ?? "unknown"}, port ${owner.live.port}); service wrapper staying out of the way.`);
+      console.log(`${managementOnly ? "NexCode management service" : "Proxy"} already running (PID ${owner.live.pid ?? owner.pidSnapshot ?? "unknown"}, port ${owner.live.port}); service wrapper staying out of the way.`);
       process.exit(0);
     }
-    console.error(`⚠️  Proxy already running (PID ${owner.live.pid ?? owner.pidSnapshot ?? "unknown"}, port ${owner.live.port}). Use 'nxc stop' first.`);
+    console.error(`⚠️  NexCode already running (PID ${owner.live.pid ?? owner.pidSnapshot ?? "unknown"}, port ${owner.live.port}). Use 'nxc stop' first.`);
     process.exit(1);
   }
 
@@ -260,7 +276,7 @@ async function handleStart(options: { block?: boolean } = {}) {
       // Prewarm the live provider model cache as soon as the port is bound so the
       // first GUI /v1/models (and syncModelsToCodex below) share one discovery flight
       // instead of racing duplicate upstream /models fetches.
-      scheduleCatalogPrewarm();
+      if (!managementOnly) scheduleCatalogPrewarm();
       break;
     } catch (err) {
       if (!isAddrInUse(err) || attempt >= 2) throw err;
@@ -352,7 +368,7 @@ async function handleStart(options: { block?: boolean } = {}) {
     }
     shuttingDown = true;
     shutdownStartedAt = now;
-    console.log("\n🛑 Shutting down nexcode proxy...");
+    console.log(`\n🛑 Shutting down ${managementOnly ? "NexCode management" : "nexcode proxy"}...`);
     void (async () => {
       try {
         await drainAndShutdown(server, config.shutdownTimeoutMs ?? 5000);
@@ -372,7 +388,9 @@ async function handleStart(options: { block?: boolean } = {}) {
 
   // System-wide env injection AFTER signal handlers are registered (crash safety:
   // syncCleanup reverts even if injection itself or subsequent startup steps fail).
-  const systemEnv = await injectSystemEnv(port, config).catch(() => ({ injected: false }));
+  const systemEnv = managementOnly
+    ? { injected: false }
+    : await injectSystemEnv(port, config).catch(() => ({ injected: false }));
   // The hook is useful only for an installed Claude Code CLI. Reconcile instead of
   // appending unconditionally so stale NexCode-owned hooks are removed as well.
   reportShellHookFailure(reconcileShellHook(systemEnv.injected));
@@ -380,13 +398,18 @@ async function handleStart(options: { block?: boolean } = {}) {
   // deferred until the best-effort Claude roster reconciliation settles. This
   // keeps /readyz closed across both startup writes without making an optional
   // Claude integration failure prevent the proxy from starting.
-  const startupSync = await reconcileClientStartupBeforeReady(
-    readinessGate,
-    gate => syncCodexOnStartIfEnabled(port, config, undefined, gate),
-    () => systemEnv.injected
-      ? Promise.resolve(null)
-      : syncClaudeAgentDefsAtProxyStartup(config, port),
-  );
+  const startupSync = managementOnly
+    ? (() => {
+      readinessGate.markReady();
+      return { ran: false, catalogWritten: false, cacheSynced: false };
+    })()
+    : await reconcileClientStartupBeforeReady(
+      readinessGate,
+      gate => syncCodexOnStartIfEnabled(port, config, undefined, gate),
+      () => systemEnv.injected
+        ? Promise.resolve(null)
+        : syncClaudeAgentDefsAtProxyStartup(config, port),
+    );
   if (!startupSync.ran) console.log("   Codex integration OFF; startup left Codex native.");
   // #1046: one warning per startup, after BOTH writes. The server's cache
   // invalidation happens first and the catalog sync second, so the mtime is only
@@ -397,11 +420,11 @@ async function handleStart(options: { block?: boolean } = {}) {
     const { warnIfStaleCodexAppServersAfterStartupWrite } = await import("../codex/app-server-processes");
     warnIfStaleCodexAppServersAfterStartupWrite({ log: console });
   }
-  if (!currentExternalCodexModelProvider() && !shouldInjectApiAuthHeader(config) && config.syncResumeHistory !== false) {
+  if (!managementOnly && !currentExternalCodexModelProvider() && !shouldInjectApiAuthHeader(config) && config.syncResumeHistory !== false) {
     historyGuardian = startHistoryMigrationGuardian();
   }
   // Build Desktop 3P alias registry so inbound claude-opus-4-8-{code} aliases (and legacy claude-opus-4-{code}) decode correctly.
-  try {
+  if (!managementOnly) try {
     const { fetchAllModels } = await import("../server/management-api");
     const { visibleNativeSlugs, filterCatalogVisibleModels } = await import("../codex/catalog");
     const models = filterCatalogVisibleModels(await fetchAllModels(config), config);
@@ -419,7 +442,7 @@ async function handleStart(options: { block?: boolean } = {}) {
   //
   // Gated on the persisted switch: without this, turning Grok off lasted exactly
   // one restart, because the toggle removed the fence and start wrote it back.
-  if (shouldSyncGrokOnStart(config)) try {
+  if (!managementOnly && shouldSyncGrokOnStart(config)) try {
     const { syncGrokConfig } = await import("../grok/sync");
     const r = await syncGrokConfig(port, config, config.hostname ? { hostname: config.hostname } : {});
     if (r.changed) console.log("   + Grok Build config updated (~/.grok/config.toml)");
@@ -447,6 +470,8 @@ function detachedStartEnvironment(): NodeJS.ProcessEnv {
 }
 
 async function handleEnsure(options: { existingIsSuccess?: boolean } = {}): Promise<boolean> {
+  const managementOnly = isManagementOnlyRuntime();
+  enforceManagementOnlyClientState();
   const owner = await findProxyOwnerBeforeJournalRecovery({ probeConfiguredPort: true });
   const config = loadConfig();
   if (!codexAutoStartEnabled(config)) {
@@ -456,29 +481,33 @@ async function handleEnsure(options: { existingIsSuccess?: boolean } = {}): Prom
   const live = owner.live;
   if (live) {
     if (options.existingIsSuccess === false) {
-      console.error("Proxy appeared while restart was confirming absence; no start was attempted.");
+      console.error(`${managementOnly ? "NexCode" : "Proxy"} appeared while restart was confirming absence; no start was attempted.`);
       return false;
     }
-      const synced = await syncModelsToCodex(live.port).catch(e => {
-        console.error(`⚠️  Model sync skipped: ${e instanceof Error ? e.message : String(e)}`);
-        return null;
-      });
-      if (synced?.status === "skipped") console.log("   Codex integration OFF; startup left Codex native.");
-      // Ensure env file exists for already-running proxy (may have been deleted or pre-dates this feature).
-      const systemEnv = await injectSystemEnv(live.port, config).catch(() => ({ injected: false }));
-      reportShellHookFailure(reconcileShellHook(systemEnv.injected));
-      if (!systemEnv.injected) await syncClaudeAgentDefsAtProxyStartup(config, live.port);
-      // Refresh the Grok Build fence too (same contract as start). live.hostname is the
-      // hostname the running proxy actually bound — config.hostname may have drifted.
-      // The reconciler re-reads immediately before each client-file mutation; only
-      // the live proxy's observed bind host is safe to carry across this boundary.
-      await reconcileEnsureDesiredIntegrations(
-        live.port,
-        { kind: "live", hostname: live.hostname },
-      );
-      console.log(`✅ Proxy running on port ${live.port}`);
+    if (managementOnly) {
+      console.log(`✅ NexCode management service running on port ${live.port}`);
       return true;
     }
+    const synced = await syncModelsToCodex(live.port).catch(e => {
+      console.error(`⚠️  Model sync skipped: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    });
+    if (synced?.status === "skipped") console.log("   Codex integration OFF; startup left Codex native.");
+    // Ensure env file exists for already-running proxy (may have been deleted or pre-dates this feature).
+    const systemEnv = await injectSystemEnv(live.port, config).catch(() => ({ injected: false }));
+    reportShellHookFailure(reconcileShellHook(systemEnv.injected));
+    if (!systemEnv.injected) await syncClaudeAgentDefsAtProxyStartup(config, live.port);
+    // Refresh the Grok Build fence too (same contract as start). live.hostname is the
+    // hostname the running proxy actually bound — config.hostname may have drifted.
+    // The reconciler re-reads immediately before each client-file mutation; only
+    // the live proxy's observed bind host is safe to carry across this boundary.
+    await reconcileEnsureDesiredIntegrations(
+      live.port,
+      { kind: "live", hostname: live.hostname },
+    );
+    console.log(`✅ Proxy running on port ${live.port}`);
+    return true;
+  }
 
   const pinPort = config.port ?? 10100;
   const child = spawn(process.execPath, startArgv(pinPort > 0 ? pinPort : undefined), {
@@ -491,9 +520,13 @@ async function handleEnsure(options: { existingIsSuccess?: boolean } = {}): Prom
 
   const port = (await waitForProxy())?.port;
   if (!port) {
-    console.error("❌ Proxy did not become healthy after starting.");
+    console.error(`❌ ${managementOnly ? "NexCode management service" : "Proxy"} did not become healthy after starting.`);
     process.exitCode = 1;
     return false;
+  }
+  if (managementOnly) {
+    console.log(`✅ NexCode management service running on port ${port}`);
+    return true;
   }
   // Deterministic fence guarantee when the durable switch is ON: the spawned child
   // injects late in its own startup, but this parent returns as soon as /healthz
@@ -573,20 +606,21 @@ async function waitForProxyReplacement(
 }
 
 function reportRestartFailure(result: Extract<ProxyRestartResult, { ok: false }>): void {
+  const runtime = isManagementOnlyRuntime() ? "NexCode management service" : "proxy";
   if (result.phase === "identity") {
-    console.error("❌ Refusing to restart because the running proxy identity could not be attested.");
+    console.error(`❌ Refusing to restart because the running ${runtime} identity could not be attested.`);
   } else if (result.phase === "request") {
     const code = result.error instanceof Error ? result.error.message : "";
     if (code === "restart_capability_unsupported") {
-      console.error("❌ The running proxy predates process-bound restart support; no unsafe fallback was attempted.");
-      console.error("   After confirming this home owns the proxy, run `nxc stop` and then `nxc start` once.");
+      console.error(`❌ The running ${runtime} predates process-bound restart support; no unsafe fallback was attempted.`);
+      console.error(`   After confirming this home owns the ${runtime}, run \`nxc stop\` and then \`nxc start\` once.`);
     } else {
-      console.error("❌ Proxy restart request could not be confirmed; no fallback stop/start was attempted.");
+      console.error(`❌ ${isManagementOnlyRuntime() ? "Management service" : "Proxy"} restart request could not be confirmed; no fallback stop/start was attempted.`);
     }
   } else if (result.phase === "replacement") {
-    console.error("❌ Proxy restart was accepted, but no identity-verified replacement became healthy in time.");
+    console.error(`❌ ${isManagementOnlyRuntime() ? "Management service" : "Proxy"} restart was accepted, but no identity-verified replacement became healthy in time.`);
   } else {
-    console.error("❌ Proxy was not running and the fallback start did not become healthy.");
+    console.error(`❌ ${isManagementOnlyRuntime() ? "Management service" : "Proxy"} was not running and the fallback start did not become healthy.`);
   }
 }
 
@@ -614,7 +648,7 @@ async function handleTrayProxyRestart(): Promise<void> {
 
 async function handleRestartStartWhenStopped(): Promise<boolean | "skipped"> {
   if (!codexAutoStartEnabled(loadConfig())) {
-    console.log("Codex autostart is disabled; no proxy was started.");
+    console.log(`Codex autostart is disabled; no ${isManagementOnlyRuntime() ? "management service" : "proxy"} was started.`);
     return "skipped";
   }
   return handleEnsure({ existingIsSuccess: false });
@@ -647,6 +681,7 @@ async function restoreSharedClientStateAfterStop(): Promise<boolean> {
 }
 
 async function handleStop() {
+  const managementOnly = isManagementOnlyRuntime();
   let stopFailed = false;
   let stoppedService = false;
   // An ownership mismatch means the service manager was never even contacted: the installed
@@ -675,12 +710,12 @@ async function handleStop() {
       // Graceful-first (management-API drain) — on Windows this is the only path where
       // the proxy's shutdown handlers actually run; taskkill /F is the fallback inside.
       await stopProxy(pid);
-      console.log(`✅ Proxy (PID ${pid}) stopped.`);
+      console.log(`✅ ${managementOnly ? "NexCode management service" : "Proxy"} (PID ${pid}) stopped.`);
       removePid(pid);
       removeRuntimePort(pid);
     } catch (err) {
       stopFailed = true;
-      console.error(`❌ Failed to stop proxy (PID ${pid}).`);
+      console.error(`❌ Failed to stop ${managementOnly ? "NexCode management service" : "proxy"} (PID ${pid}).`);
       // stopProxy throws with the reason — an ownership refusal (409) carries the
       // remediation ("run the stop from that home"). Swallowing it leaves the operator
       // with a bare failure and a manual `kill` as the obvious next move, which is the
@@ -703,10 +738,10 @@ async function handleStop() {
     if (live?.pid) {
       try {
         await stopProxy(live.pid);
-        console.log(`✅ Proxy (PID ${live.pid}) stopped.`);
+        console.log(`✅ ${managementOnly ? "NexCode management service" : "Proxy"} (PID ${live.pid}) stopped.`);
       } catch (err) {
         stopFailed = true;
-        console.error(`❌ Failed to stop proxy (PID ${live.pid}).`);
+        console.error(`❌ Failed to stop ${managementOnly ? "NexCode management service" : "proxy"} (PID ${live.pid}).`);
         const detail = err instanceof Error ? err.message : String(err);
         if (detail) console.error(`   ${detail}`);
         if (err instanceof ProxyOwnershipRefusedError) {
@@ -715,7 +750,7 @@ async function handleStop() {
         }
       }
     } else if (!stoppedService) {
-      console.log("No running proxy found.");
+      console.log(`No running ${managementOnly ? "NexCode management service" : "proxy"} found.`);
     }
     if (!stopFailed) {
       // `readPid() === null` means the snapshotted pid file was absent, invalid, dead, or
@@ -825,6 +860,7 @@ async function handleUninstall() {
 }
 
 async function handleStatus() {
+  const managementOnly = isManagementOnlyRuntime();
   const statusArgs = args.slice(1);
   const wantsJson = statusArgs.length === 1 && statusArgs[0] === "--json";
   if (statusArgs.length > 1 || (statusArgs.length === 1 && !wantsJson)) {
@@ -839,13 +875,15 @@ async function handleStatus() {
   }
 
   if (status.json.proxy.pid || status.json.proxy.health.ok) {
-    console.log(`✅ Proxy: ${status.proxyLabel}`);
+    console.log(`✅ ${managementOnly ? "NexCode management service" : "Proxy"}: ${status.proxyLabel}`);
   } else {
-    console.log(`❌ Proxy: ${status.proxyLabel}`);
+    console.log(`❌ ${managementOnly ? "NexCode management service" : "Proxy"}: ${status.proxyLabel}`);
   }
   console.log(`   Health: ${status.healthLabel}`);
   if (!(status.json.proxy.pid || status.json.proxy.health.ok)) {
-    console.log("   ↳ Not running — Codex/Claude requests will fail with connection errors.");
+    console.log(managementOnly
+      ? "   ↳ Not running — account, usage and workspace management are unavailable. Codex requests remain direct."
+      : "   ↳ Not running — Codex/Claude requests will fail with connection errors.");
     // The service summary a few lines below already tells a registered-but-not-serving
     // user to repair. Printing "install the persistent service" unconditionally
     // contradicted it in the same report, and install re-registers: UAC on Windows and a

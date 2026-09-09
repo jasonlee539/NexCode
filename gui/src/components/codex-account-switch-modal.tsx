@@ -8,6 +8,7 @@ export function CodexAccountSwitchModal({
   confirm,
   accountLabel,
   accountModeState,
+  nativeLoginSwitch = false,
   switchingId,
   orderBusy = false,
   onCancel,
@@ -16,6 +17,7 @@ export function CodexAccountSwitchModal({
   confirm: CodexAccountEntry;
   accountLabel: string;
   accountModeState: CodexAccountModeState | null;
+  nativeLoginSwitch?: boolean;
   switchingId: string | null;
   /**
    * An in-flight selection-order write. It clears the pin this switch would set, so the
@@ -49,13 +51,17 @@ export function CodexAccountSwitchModal({
     >
       <button type="button" className="modal-backdrop-dismiss" aria-label={t("common.close")} tabIndex={-1} onClick={onCancel} />
       <div className="modal-card" onClick={e => e.stopPropagation()} role="document">
-        <h3 id="codex-switch-title">{accountModeState === "direct"
-          ? t("codexAuth.preparePoolTitle")
-          : confirm.id === "__main__" ? t("codexAuth.switchBack") : t("codexAuth.switchTitle")}</h3>
+        <h3 id="codex-switch-title">{nativeLoginSwitch
+          ? t("codexAuth.switchTitle")
+          : accountModeState === "direct"
+            ? t("codexAuth.preparePoolTitle")
+            : confirm.id === "__main__" ? t("codexAuth.switchBack") : t("codexAuth.switchTitle")}</h3>
         <p className="modal-desc">
-          {accountModeState === "direct"
-            ? t("codexAuth.preparePoolDesc")
-            : confirm.id === "__main__" ? t("codexAuth.switchBackDesc") : t("codexAuth.switchDesc")}
+          {nativeLoginSwitch
+            ? t("codexAuth.nativeSwitchDesc")
+            : accountModeState === "direct"
+              ? t("codexAuth.preparePoolDesc")
+              : confirm.id === "__main__" ? t("codexAuth.switchBackDesc") : t("codexAuth.switchDesc")}
         </p>
         <div className="card codex-account-switch-target">
           <strong title={accountLabel}>{accountLabel}</strong>
@@ -67,7 +73,11 @@ export function CodexAccountSwitchModal({
         <div className="modal-actions">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>{t("codexAuth.cancel")}</button>
           <button type="button" className="btn btn-primary" disabled={Boolean(switchingId) || orderBusy} onClick={onConfirm}>
-            {switchingId ? t("pws.accountSwitching") : t(accountModeState === "direct" ? "codexAuth.prepareForPool" : "codexAuth.setAsNext")}
+            {switchingId
+              ? t("pws.accountSwitching")
+              : t(nativeLoginSwitch
+                ? "codexAuth.nativeSwitchAction"
+                : accountModeState === "direct" ? "codexAuth.prepareForPool" : "codexAuth.setAsNext")}
           </button>
         </div>
       </div>

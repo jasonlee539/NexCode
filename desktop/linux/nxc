@@ -21,4 +21,5 @@ fi
 # The plain-JavaScript launcher snapshots the real parent environment before the
 # Bun child loads a project .env. Disable dotenv only for that first launcher;
 # the TypeScript runtime it starts retains NexCode's normal interpolation rules.
+export NEXCODE_MANAGEMENT_ONLY=1
 exec "$BUN_BIN" --no-env-file "$RUNTIME_ROOT/bin/nxc.mjs" "$@"

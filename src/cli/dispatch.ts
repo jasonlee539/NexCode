@@ -21,6 +21,7 @@ import { restoreNativeCodexAsync } from "../codex/inject";
 import { stripGrokConfig } from "../grok/inject";
 import { afterCatalogWriteHandleAppServers } from "../codex/app-server-processes";
 import { normalizeUpdateChannel, runGuiUpdateWorker } from "../update/job";
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
 
 export interface CliDispatchDeps {
   args: string[];
@@ -64,7 +65,9 @@ const commandRunners: Record<string, CommandRunner> = {
     // Downtime warning lives HERE, not in handleStop: `restart`/tray-restart callers
     // re-start the proxy immediately, so warning there would contradict the next line.
     if (await deps.handleStop()) {
-      console.log("⚠️  Codex/Claude requests through the proxy will fail until it is restarted ('nxc start' or 'nxc service start').");
+      console.log(isManagementOnlyRuntime()
+        ? "NexCode management features are unavailable until the service is started again ('nxc start' or 'nxc service start')."
+        : "⚠️  Codex/Claude requests through the proxy will fail until it is restarted ('nxc start' or 'nxc service start').");
     }
     return Number(process.exitCode ?? 0);
   },

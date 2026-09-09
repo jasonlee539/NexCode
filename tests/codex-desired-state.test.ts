@@ -27,6 +27,7 @@ import type { NxcConfig } from "../src/types";
 
 let testRoot = "";
 let previousNexcodeHome: string | undefined;
+let previousManagementOnly: string | undefined;
 
 function baseConfig(): NxcConfig {
   return { port: 10100, providers: {}, defaultProvider: "openai" };
@@ -34,6 +35,8 @@ function baseConfig(): NxcConfig {
 
 beforeEach(() => {
   previousNexcodeHome = process.env.NEXCODE_HOME;
+  previousManagementOnly = process.env.NEXCODE_MANAGEMENT_ONLY;
+  delete process.env.NEXCODE_MANAGEMENT_ONLY;
   testRoot = mkdtempSync(join(tmpdir(), "nxc-desired-state-"));
   process.env.NEXCODE_HOME = testRoot;
 });
@@ -41,6 +44,8 @@ beforeEach(() => {
 afterEach(() => {
   if (previousNexcodeHome === undefined) delete process.env.NEXCODE_HOME;
   else process.env.NEXCODE_HOME = previousNexcodeHome;
+  if (previousManagementOnly === undefined) delete process.env.NEXCODE_MANAGEMENT_ONLY;
+  else process.env.NEXCODE_MANAGEMENT_ONLY = previousManagementOnly;
   rmSync(testRoot, { recursive: true, force: true });
 });
 
@@ -190,6 +195,18 @@ describe("the startup gate", () => {
   test("the shared sync predicate has the same absent-means-on semantics", () => {
     expect(shouldSyncCodexOnStart(baseConfig())).toBe(true);
     expect(shouldSyncCodexOnStart({ ...baseConfig(), clientIntegrations: { codex: false } })).toBe(false);
+  });
+
+  test("management-only mode never injects Codex routing even when integration intent is on", async () => {
+    process.env.NEXCODE_MANAGEMENT_ONLY = "1";
+    let calls = 0;
+    expect(shouldSyncCodexOnStart(baseConfig())).toBe(false);
+    const outcome = await syncCodexOnStartIfEnabled(10100, baseConfig(), async () => {
+      calls += 1;
+      return undefined;
+    });
+    expect(outcome.ran).toBe(false);
+    expect(calls).toBe(0);
   });
 
   test("absence, an empty object, and an explicit true all still sync", async () => {

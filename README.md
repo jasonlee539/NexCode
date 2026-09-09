@@ -1,16 +1,13 @@
 # NexCode
 
-NexCode 是一款本地 AI 路由桌面软件。它把 Codex、Codex App、Claude Code、
-Claude Desktop、Grok Build 及兼容客户端接入同一个本地代理，并提供完整的原生
-macOS 应用与管理界面。
+NexCode 是一款 Codex 本地管理桌面软件，用来管理 Codex CLI/App 的账号、用量、
+会话与本地设置。模型请求始终由 Codex 直接连接 OpenAI，不经过 NexCode 的本地端口。
 
 ## 能力
 
-- 兼容 OpenAI Responses、Chat Completions、Anthropic Messages 与实时传输。
-- 支持内置及自定义 Provider、OAuth/API Key、模型发现与模型可见性管理。
-- 支持组合路由、失败切换、权重路由、账号池、配额感知和线程亲和。
-- 支持子代理模型路由、Web Search、视觉 sidecar、请求日志与用量分析。
-- 管理 Codex、Claude Code/Desktop、Grok、OpenCode、MCode、ZCode 等本地集成。
+- 管理多个 ChatGPT/Codex 账号及配额状态。
+- 账号切换会真实更新 Codex 原生登录，CLI 与 App 保持一致。
+- 提供会话、请求日志与本地用量分析。
 - 提供配置备份/恢复、存储策略、兼容性实验室、健康检查和后台服务能力。
 - 使用独立的 `~/.nexcode` 数据目录和 `NEXCODE_HOME` 环境变量。
 
@@ -45,8 +42,8 @@ node bin/nxc.mjs status
 node bin/nxc.mjs --help
 ```
 
-默认管理界面为 `http://localhost:10100`。端口被占用时，NexCode 会选择可用端口，
-桌面应用会自动发现实际地址。
+默认管理界面为 `http://localhost:10100`。这个地址只承载本地管理页面和管理 API，
+不接收或转发模型请求；端口被占用时，桌面应用会自动发现实际管理地址。
 
 ## 源码结构
 

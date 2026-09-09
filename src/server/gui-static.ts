@@ -132,7 +132,7 @@ export function serveGuiFile(
   });
 }
 
-export function rootFallbackPayload() {
+export function rootFallbackPayload(managementOnly = false) {
   return {
     status: "ok",
     service: "nexcode",
@@ -141,12 +141,17 @@ export function rootFallbackPayload() {
       available: false,
       reason: "GUI build not found. Run `bun run build:gui` from the nexcode repo, or use `nxc gui` from a packaged install.",
     },
-    endpoints: {
-      health: "/healthz",
-      models: "/v1/models",
-      responses: "/v1/responses",
-      chatCompletions: "/v1/chat/completions",
-      management: "/api/*",
-    },
+    endpoints: managementOnly
+      ? {
+          health: "/healthz",
+          management: "/api/*",
+        }
+      : {
+          health: "/healthz",
+          models: "/v1/models",
+          responses: "/v1/responses",
+          chatCompletions: "/v1/chat/completions",
+          management: "/api/*",
+        },
   };
 }

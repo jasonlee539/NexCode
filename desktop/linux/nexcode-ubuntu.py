@@ -14,6 +14,12 @@ from typing import Optional
 from urllib.parse import urlencode, urlparse
 from urllib.request import ProxyHandler, build_opener
 
+# WebKitGTK's accelerated compositor can produce a fully interactive but blank
+# surface with some Mesa/NVIDIA and X11/Wayland combinations. The dashboard does
+# not need WebGL, so prefer the portable renderer while still allowing an
+# explicit environment override for diagnostics.
+os.environ.setdefault("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
+
 import gi
 
 gi.require_version("Gtk", "3.0")
@@ -21,14 +27,30 @@ try:
     gi.require_version("WebKit2", "4.1")
 except ValueError:
     gi.require_version("WebKit2", "4.0")
+try:
+    gi.require_version("AyatanaAppIndicator3", "0.1")
+except ValueError:
+    pass
 
 from gi.repository import Gio, GLib, Gtk, WebKit2  # noqa: E402
+try:
+    from gi.repository import AyatanaAppIndicator3  # noqa: E402
+except ImportError:
+    AyatanaAppIndicator3 = None
 
 
 APP_ID = "com.nexcode.Ubuntu"
 APP_NAME = "NexCode"
 START_TIMEOUT_SECONDS = 30.0
 HTTP = build_opener(ProxyHandler({}))
+
+
+def _icon_path() -> Optional[Path]:
+    candidates = (
+        Path("/usr/share/pixmaps/nexcode-ubuntu.png"),
+        Path(__file__).resolve().parents[1] / "assets" / "NexCode-1024.png",
+    )
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def _config_directory() -> Path:
@@ -106,7 +128,7 @@ def _runtime_candidates() -> list[tuple[str, int, Optional[int]]]:
     return candidates
 
 
-def _healthy_dashboard() -> Optional[str]:
+def _healthy_runtime() -> Optional[tuple[str, str]]:
     for host, port, expected_pid in _runtime_candidates():
         authority = _url_authority(host, port)
         try:
@@ -117,11 +139,20 @@ def _healthy_dashboard() -> Optional[str]:
             reported_pid = payload.get("pid")
             if expected_pid is not None and reported_pid != expected_pid:
                 continue
-            query = urlencode({"desktop": "1", "platform": "ubuntu"})
-            return f"http://{authority}/?{query}"
+            mode = payload.get("runtimeMode")
+            return authority, mode if isinstance(mode, str) else "legacy-proxy"
         except (OSError, ValueError, TimeoutError):
             continue
     return None
+
+
+def _healthy_dashboard() -> Optional[str]:
+    runtime = _healthy_runtime()
+    if runtime is None or runtime[1] != "management":
+        return None
+    authority, _mode = runtime
+    query = urlencode({"desktop": "1", "platform": "ubuntu"})
+    return f"http://{authority}/?{query}"
 
 
 class NexCodeApplication(Gtk.Application):
@@ -132,6 +163,7 @@ class NexCodeApplication(Gtk.Application):
         self.webview: Optional[WebKit2.WebView] = None
         self.spinner: Optional[Gtk.Spinner] = None
         self.status_label: Optional[Gtk.Label] = None
+        self.indicator = None
         self.runtime_process: Optional[subprocess.Popen[bytes]] = None
         self.runtime_url: Optional[str] = None
         self.cancel = threading.Event()
@@ -155,6 +187,16 @@ class NexCodeApplication(Gtk.Application):
         Gtk.Window.set_default_icon_name("nexcode-ubuntu")
         self.window = Gtk.ApplicationWindow(application=self)
         self.window.set_title(APP_NAME)
+        icon_path = _icon_path()
+        if icon_path is not None:
+            try:
+                self.window.set_icon_from_file(str(icon_path))
+            except GLib.Error:
+                pass
+        try:
+            self.window.set_wmclass(APP_ID, APP_ID)
+        except AttributeError:
+            pass
         self.window.set_default_size(1215, 780)
         self.window.set_size_request(900, 600)
         self.window.set_position(Gtk.WindowPosition.CENTER)
@@ -174,8 +216,10 @@ class NexCodeApplication(Gtk.Application):
         self.webview = WebKit2.WebView()
         self.webview.connect("decide-policy", self._decide_policy)
         self.webview.connect("load-failed", self._load_failed)
+        self.webview.connect("web-process-terminated", self._web_process_terminated)
         self.stack.add_named(self.webview, "dashboard")
 
+        self._install_indicator()
         self.window.add(self.stack)
         self.window.show_all()
         self.stack.set_visible_child_name("loading")
@@ -187,7 +231,7 @@ class NexCodeApplication(Gtk.Application):
         box.set_halign(Gtk.Align.CENTER)
         self.spinner = Gtk.Spinner()
         self.spinner.start()
-        self.status_label = Gtk.Label(label="Starting the local NexCode service…")
+        self.status_label = Gtk.Label(label="Opening NexCode…")
         box.pack_start(self.spinner, False, False, 0)
         box.pack_start(self.status_label, False, False, 0)
         return box
@@ -213,7 +257,7 @@ class NexCodeApplication(Gtk.Application):
         if self.spinner is not None:
             self.spinner.start()
         if self.status_label is not None:
-            self.status_label.set_text("Starting the local NexCode service…")
+            self.status_label.set_text("Opening NexCode…")
         threading.Thread(target=self._runtime_worker, name="nexcode-runtime", daemon=True).start()
 
     def _runtime_worker(self) -> None:
@@ -228,12 +272,29 @@ class NexCodeApplication(Gtk.Application):
             launcher = _launcher(runtime)
             env = os.environ.copy()
             env["NEXCODE_DESKTOP_APP"] = "1"
+            env["NEXCODE_MANAGEMENT_ONLY"] = "1"
             env["PATH"] = os.pathsep.join(
                 [str(Path.home() / ".bun" / "bin"), str(Path.home() / ".local" / "bin"), "/usr/local/bin", "/usr/bin", "/bin"]
             )
             cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "nexcode-ubuntu"
             cache_dir.mkdir(parents=True, exist_ok=True)
             self.log_handle = (cache_dir / "desktop.log").open("ab", buffering=0)
+            # Upgrades can leave the previous proxy-capable runtime alive. Stop
+            # that NexCode-owned process before launching the management-only
+            # listener; otherwise the old data plane would retain the port and
+            # the desktop shell could never become ready.
+            observed = _healthy_runtime()
+            if observed is not None and observed[1] != "management":
+                subprocess.run(
+                    [str(bun), "--no-env-file", str(launcher), "stop"],
+                    cwd=runtime,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=self.log_handle,
+                    stderr=subprocess.STDOUT,
+                    timeout=45,
+                    check=False,
+                )
             self.runtime_process = subprocess.Popen(
                 [str(bun), "--no-env-file", str(launcher), "start"],
                 cwd=runtime,
@@ -243,7 +304,7 @@ class NexCodeApplication(Gtk.Application):
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        except (OSError, RuntimeError) as error:
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
             GLib.idle_add(self._runtime_failed, str(error))
             return
 
@@ -253,7 +314,7 @@ class NexCodeApplication(Gtk.Application):
             return
         code = self.runtime_process.poll() if self.runtime_process else None
         suffix = f" (exit status {code})" if code is not None else ""
-        GLib.idle_add(self._runtime_failed, f"The local NexCode service did not become ready{suffix}.")
+        GLib.idle_add(self._runtime_failed, f"NexCode management did not become ready{suffix}.")
 
     def _wait_for_runtime(self, timeout: float) -> Optional[str]:
         deadline = time.monotonic() + timeout
@@ -280,7 +341,7 @@ class NexCodeApplication(Gtk.Application):
         error_view = self.stack.get_child_by_name("error")
         label = error_view.get_children()[0] if error_view is not None else None
         if isinstance(label, Gtk.Label):
-            label.set_text(f"NexCode could not start.\n\n{message}\n\nSee ~/.cache/nexcode-ubuntu/desktop.log for details.")
+            label.set_text(f"NexCode could not open.\n\n{message}\n\nSee ~/.cache/nexcode-ubuntu/desktop.log for details.")
         self.stack.set_visible_child_name("error")
         if self.spinner is not None:
             self.spinner.stop()
@@ -328,7 +389,47 @@ class NexCodeApplication(Gtk.Application):
         self._runtime_failed(f"The dashboard could not be loaded: {error.message}")
         return False
 
+    def _web_process_terminated(self, _webview: WebKit2.WebView, _reason: object) -> None:
+        self._runtime_failed("The dashboard renderer stopped unexpectedly.")
+
+    def _install_indicator(self) -> None:
+        if AyatanaAppIndicator3 is None:
+            return
+        icon_path = _icon_path()
+        icon = str(icon_path) if icon_path is not None else "nexcode-ubuntu"
+        self.indicator = AyatanaAppIndicator3.Indicator.new(
+            APP_ID,
+            icon,
+            AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS,
+        )
+        self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
+        self.indicator.set_title(APP_NAME)
+
+        menu = Gtk.Menu()
+        open_item = Gtk.MenuItem.new_with_label("Open NexCode")
+        open_item.connect("activate", self._show_from_indicator)
+        menu.append(open_item)
+        menu.append(Gtk.SeparatorMenuItem())
+        quit_item = Gtk.MenuItem.new_with_label("Quit NexCode")
+        quit_item.connect("activate", self._quit_from_indicator)
+        menu.append(quit_item)
+        menu.show_all()
+        self.indicator.set_menu(menu)
+
+    def _show_from_indicator(self, _item: Gtk.MenuItem) -> None:
+        if self.window is None:
+            self.activate()
+            return
+        self.window.show_all()
+        self.window.present()
+
+    def _quit_from_indicator(self, _item: Gtk.MenuItem) -> None:
+        self.quit()
+
     def _quit_from_window(self, _window: Gtk.Window, _event: object) -> bool:
+        if self.indicator is not None and self.window is not None:
+            self.window.hide()
+            return True
         self.quit()
         return True
 
@@ -347,6 +448,7 @@ class NexCodeApplication(Gtk.Application):
             launcher = _launcher(runtime)
             env = os.environ.copy()
             env["NEXCODE_DESKTOP_APP"] = "1"
+            env["NEXCODE_MANAGEMENT_ONLY"] = "1"
             subprocess.run(
                 [str(bun), "--no-env-file", str(launcher), "stop"],
                 cwd=runtime,
@@ -370,4 +472,6 @@ class NexCodeApplication(Gtk.Application):
 
 
 if __name__ == "__main__":
+    GLib.set_prgname(APP_ID)
+    GLib.set_application_name(APP_NAME)
     raise SystemExit(NexCodeApplication().run(sys.argv))

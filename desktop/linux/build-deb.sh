@@ -78,7 +78,8 @@ mkdir -p \
   "$RUNTIME_DIR/gui" \
   "$PACKAGE_ROOT/usr/share/applications" \
   "$PACKAGE_ROOT/usr/share/doc/nexcode-ubuntu" \
-  "$PACKAGE_ROOT/usr/share/icons/hicolor/1024x1024/apps"
+  "$PACKAGE_ROOT/usr/share/icons/hicolor/1024x1024/apps" \
+  "$PACKAGE_ROOT/usr/share/pixmaps"
 
 cat > "$PACKAGE_ROOT/DEBIAN/control" <<EOF
 Package: $PACKAGE_NAME
@@ -86,12 +87,13 @@ Version: $DEB_VERSION
 Section: devel
 Priority: optional
 Architecture: $DEB_ARCH
-Depends: python3 (>= 3.8), python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.0 | gir1.2-webkit2-4.1, xdg-utils, libc6 (>= 2.31), libstdc++6
-Maintainer: NexCode Maintainers <noreply@github.com>
+Depends: python3 (>= 3.8), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, gir1.2-webkit2-4.0 | gir1.2-webkit2-4.1, xdg-utils, libc6 (>= 2.31), libstdc++6
+Recommends: gnome-shell-extension-appindicator
+Maintainer: NexCode Maintainers <maintainers@example.com>
 Homepage: https://github.com/lidge-jun/nexcode
-Description: Ubuntu desktop provider proxy for Codex and Claude Code
- NexCode exposes multiple LLM providers through one local OpenAI-compatible
- endpoint. This package includes a GTK/WebKit desktop shell and the Bun runtime.
+Description: Ubuntu desktop account manager for Codex
+ NexCode manages native Codex accounts, usage and local settings. Its loopback
+ service is management-only; Codex model traffic connects directly to OpenAI.
 EOF
 
 printf 'Staging packaged runtime...\n'
@@ -115,15 +117,41 @@ install -m 0755 "$SCRIPT_DIR/nxc" "$PACKAGE_ROOT/usr/bin/nxc"
 ln -s nxc "$PACKAGE_ROOT/usr/bin/nexcode"
 install -m 0644 "$SCRIPT_DIR/com.nexcode.Ubuntu.desktop" "$PACKAGE_ROOT/usr/share/applications/com.nexcode.Ubuntu.desktop"
 install -m 0644 "$ROOT_DIR/desktop/assets/NexCode-1024.png" "$PACKAGE_ROOT/usr/share/icons/hicolor/1024x1024/apps/nexcode-ubuntu.png"
+install -m 0644 "$ROOT_DIR/desktop/assets/NexCode-1024.png" "$PACKAGE_ROOT/usr/share/pixmaps/nexcode-ubuntu.png"
 install -m 0644 "$ROOT_DIR/UBUNTU.md" "$PACKAGE_ROOT/usr/share/doc/nexcode-ubuntu/README.md"
 install -m 0644 "$ROOT_DIR/LICENSE" "$PACKAGE_ROOT/usr/share/doc/nexcode-ubuntu/copyright"
+
+cat > "$PACKAGE_ROOT/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+exit 0
+EOF
+
+cat > "$PACKAGE_ROOT/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -e
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+exit 0
+EOF
 
 # Package only predictable permissions. Source files remain readable, while
 # launchers and the bundled runtime are executable.
 find "$PACKAGE_ROOT" -type d -exec chmod 0755 {} +
 find "$PACKAGE_ROOT" -type f -exec chmod go-w {} +
 chmod 0755 "$PACKAGE_ROOT/usr/bin/nxc" "$PACKAGE_ROOT/usr/bin/nexcode-ubuntu" \
-  "$PACKAGE_ROOT/usr/lib/nexcode-ubuntu/nexcode-ubuntu.py" "$RUNTIME_DIR/node_modules/bun/bin/"bun*
+  "$PACKAGE_ROOT/usr/lib/nexcode-ubuntu/nexcode-ubuntu.py" "$RUNTIME_DIR/node_modules/bun/bin/"bun* \
+  "$PACKAGE_ROOT/DEBIAN/postinst" "$PACKAGE_ROOT/DEBIAN/postrm"
 
 # Reuse the desktop credential boundary after the entire Debian payload has
 # been assembled and before dpkg-deb can archive it.

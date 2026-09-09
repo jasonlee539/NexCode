@@ -2,7 +2,7 @@
   "name": "nexcode-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "NexCode Ubuntu desktop app and universal provider proxy for Codex and Claude Code",
+  "description": "NexCode Ubuntu desktop account and usage manager for Codex",
   "type": "module",
   "main": "./bin/package-main.mjs",
   "exports": {

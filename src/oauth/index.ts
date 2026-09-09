@@ -516,6 +516,7 @@ function merged(fresh: OAuthCredentials, previous: OAuthCredentials): OAuthCrede
   return {
     ...fresh,
     source: previous.source === "local-cli" ? "oauth" : fresh.source ?? previous.source ?? "oauth",
+    ...(fresh.idToken === undefined && previous.idToken ? { idToken: previous.idToken } : {}),
     ...(fresh.projectId === undefined && previous.projectId ? { projectId: previous.projectId } : {}),
     ...(fresh.apiBaseUrl === undefined && previous.apiBaseUrl ? { apiBaseUrl: previous.apiBaseUrl } : {}),
     ...(fresh.email === undefined && previous.email ? { email: previous.email } : {}),
