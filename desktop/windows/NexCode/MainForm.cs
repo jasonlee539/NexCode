@@ -1,10 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Web.Script.Serialization;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -18,6 +21,8 @@ namespace NexCode.Desktop
         private const int PreferredClientWidth = 1600;
         private const int PreferredClientHeight = 900;
         private readonly RuntimeController runtime = new RuntimeController();
+        private readonly UpdateService updates = new UpdateService();
+        private readonly JavaScriptSerializer webMessageJson = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
         private readonly WebView2 webView = new WebView2();
         private readonly Panel overlay = new Panel();
         private readonly Label statusLabel = new Label();
@@ -31,6 +36,8 @@ namespace NexCode.Desktop
         private bool webViewReady;
         private bool webViewInitializing;
         private bool oauthNotificationPending;
+        private bool automaticUpdateCheckStarted;
+        private bool updateCheckRunning;
         private bool allowClose;
         private bool exiting;
         private bool closeHintShown;
@@ -228,6 +235,7 @@ namespace NexCode.Desktop
             ContextMenuStrip menu = new ContextMenuStrip();
             menu.Items.Add("显示 NexCode", null, delegate { ShowAndActivate(); });
             menu.Items.Add("重新载入", null, delegate { ReloadDashboard(); });
+            menu.Items.Add("检查更新", null, delegate { BeginUpdateCheck(true); });
             menu.Items.Add("重启管理服务", null, async delegate
             {
                 ShowAndActivate();
@@ -255,6 +263,7 @@ namespace NexCode.Desktop
 
                 CoreWebView2Settings settings = webView.CoreWebView2.Settings;
                 settings.IsScriptEnabled = true;
+                settings.IsWebMessageEnabled = true;
                 settings.AreDefaultScriptDialogsEnabled = true;
                 settings.IsStatusBarEnabled = false;
                 // WebView2 persists zoom per origin in its user-data directory. A
@@ -270,6 +279,7 @@ namespace NexCode.Desktop
                 webView.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
                 webView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
                 webView.CoreWebView2.DownloadStarting += OnDownloadStarting;
+                webView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
                 webViewReady = true;
                 runtimeLink.Visible = false;
 
@@ -366,6 +376,11 @@ namespace NexCode.Desktop
             webView.Visible = true;
             Text = "NexCode";
             if (oauthNotificationPending) NotifyOAuthComplete();
+            if (!automaticUpdateCheckStarted && updates.IsInstalled)
+            {
+                automaticUpdateCheckStarted = true;
+                BeginUpdateCheck(false);
+            }
         }
 
         private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs args)
@@ -399,6 +414,135 @@ namespace NexCode.Desktop
             finally
             {
                 deferral.Complete();
+            }
+        }
+
+        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs args)
+        {
+            Dictionary<string, object> message;
+            try
+            {
+                message = webMessageJson.DeserializeObject(args.WebMessageAsJson) as Dictionary<string, object>;
+            }
+            catch
+            {
+                return;
+            }
+            if (!string.Equals(JsonString(message, "type"), "nexcode:save-markdown", StringComparison.Ordinal)) return;
+
+            string requestId = JsonString(message, "requestId");
+            string markdown = JsonString(message, "content");
+            if (string.IsNullOrWhiteSpace(requestId) || requestId.Length > 128 || markdown == null)
+            {
+                PostSaveResult(requestId, "error");
+                return;
+            }
+
+            string fileName = SafeMarkdownFileName(JsonString(message, "fileName"));
+            try
+            {
+                using (SaveFileDialog dialog = new SaveFileDialog())
+                {
+                    dialog.Title = "导出线程 Markdown";
+                    dialog.FileName = fileName;
+                    dialog.DefaultExt = "md";
+                    dialog.AddExtension = true;
+                    dialog.Filter = "Markdown 文件 (*.md)|*.md|所有文件 (*.*)|*.*";
+                    dialog.OverwritePrompt = true;
+                    dialog.CheckPathExists = true;
+                    dialog.RestoreDirectory = true;
+                    if (dialog.ShowDialog(this) != DialogResult.OK)
+                    {
+                        PostSaveResult(requestId, "cancelled");
+                        return;
+                    }
+
+                    using (FileStream output = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (StreamWriter writer = new StreamWriter(output, new UTF8Encoding(false)))
+                    {
+                        writer.Write(markdown);
+                    }
+                    PostSaveResult(requestId, "saved");
+                }
+            }
+            catch (Exception)
+            {
+                PostSaveResult(requestId, "error");
+            }
+        }
+
+        private void PostSaveResult(string requestId, string status)
+        {
+            if (!webViewReady || webView.CoreWebView2 == null || string.IsNullOrWhiteSpace(requestId)) return;
+            string payload = webMessageJson.Serialize(new Dictionary<string, string>
+            {
+                { "type", "nexcode:save-markdown-result" },
+                { "requestId", requestId },
+                { "status", status }
+            });
+            webView.CoreWebView2.PostWebMessageAsJson(payload);
+        }
+
+        private static string SafeMarkdownFileName(string value)
+        {
+            string candidate;
+            try { candidate = Path.GetFileName((value ?? "thread.md").Trim()); }
+            catch { candidate = "thread.md"; }
+            if (string.IsNullOrWhiteSpace(candidate)) candidate = "thread.md";
+            foreach (char invalid in Path.GetInvalidFileNameChars()) candidate = candidate.Replace(invalid, '-');
+            if (!candidate.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) candidate += ".md";
+            return candidate;
+        }
+
+        private static string JsonString(Dictionary<string, object> value, string key)
+        {
+            if (value == null) return null;
+            object result;
+            return value.TryGetValue(key, out result) ? result as string : null;
+        }
+
+        private async void BeginUpdateCheck(bool interactive)
+        {
+            if (updateCheckRunning) return;
+            updateCheckRunning = true;
+            try
+            {
+                UpdateRelease release = await updates.CheckForUpdateAsync();
+                if (release == null)
+                {
+                    if (interactive)
+                    {
+                        MessageBox.Show(this, "当前已是最新版本（" + updates.CurrentVersion + "）。", "NexCode 更新", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    return;
+                }
+
+                DialogResult choice = MessageBox.Show(
+                    this,
+                    "发现 NexCode " + release.Version + "。是否立即下载更新并自动重启？",
+                    "NexCode 更新",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (choice != DialogResult.Yes) return;
+
+                trayIcon.ShowBalloonTip(2500, "NexCode 更新", "正在下载并校验 Windows-Ota-Updata…", ToolTipIcon.Info);
+                string installer = await updates.DownloadInstallerAsync(release);
+                Process.Start(new ProcessStartInfo(installer, "/silent /ota")
+                {
+                    WorkingDirectory = Path.GetDirectoryName(installer),
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception error)
+            {
+                if (interactive)
+                {
+                    MessageBox.Show(this, "检查或安装更新失败：" + error.Message, "NexCode 更新", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            finally
+            {
+                updateCheckRunning = false;
             }
         }
 

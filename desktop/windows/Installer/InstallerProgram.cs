@@ -6,6 +6,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -15,7 +16,6 @@ namespace NexCode.Installer
 {
     internal static class InstallerProgram
     {
-        private const string ProductVersion = "1.0.0";
         private const string PayloadResource = "NexCodePayload.zip";
         private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexCode";
         private const string ProtocolKey = @"Software\Classes\nexcode";
@@ -41,6 +41,7 @@ namespace NexCode.Installer
             }
 
             bool silent = args.Any(value => string.Equals(value, "/silent", StringComparison.OrdinalIgnoreCase));
+            bool ota = args.Any(value => string.Equals(value, "/ota", StringComparison.OrdinalIgnoreCase));
             if (silent)
             {
                 try { Install(null); }
@@ -48,6 +49,10 @@ namespace NexCode.Installer
                 {
                     MessageBox.Show(error.Message, "NexCode 安装失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     Environment.ExitCode = 1;
+                }
+                finally
+                {
+                    if (ota) MoveFileEx(Application.ExecutablePath, null, MoveFileDelayUntilReboot);
                 }
                 return;
             }
@@ -200,7 +205,7 @@ namespace NexCode.Installer
             using (RegistryKey uninstall = Registry.CurrentUser.CreateSubKey(UninstallKey))
             {
                 uninstall.SetValue("DisplayName", "NexCode");
-                uninstall.SetValue("DisplayVersion", ProductVersion);
+                uninstall.SetValue("DisplayVersion", InstalledProductVersion(target));
                 uninstall.SetValue("Publisher", "NexCode contributors");
                 uninstall.SetValue("DisplayIcon", icon);
                 uninstall.SetValue("InstallLocation", target);
@@ -243,6 +248,21 @@ namespace NexCode.Installer
             {
                 if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
             }
+        }
+
+        private static string InstalledProductVersion(string target)
+        {
+            try
+            {
+                string packagePath = Path.Combine(target, "runtime", "package.json");
+                Match match = Regex.Match(
+                    File.ReadAllText(packagePath),
+                    "\\\"version\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"",
+                    RegexOptions.CultureInvariant);
+                if (match.Success && match.Groups[1].Value.Length <= 64) return match.Groups[1].Value;
+            }
+            catch { }
+            return "0.0.0";
         }
 
         private static void RequestShutdown(string target)

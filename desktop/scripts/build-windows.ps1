@@ -270,6 +270,10 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 )
 
 $installerPath = $null
+$otaInstallerPath = $null
+$otaChecksumPath = $null
+$otaManifestPath = $null
+$otaSignaturePath = $null
 if (-not $SkipInstaller) {
   Write-Host "Compiling single-file Windows installer..."
   $installerProject = Join-Path $root "desktop\windows\Installer\NexCodeInstaller.csproj"
@@ -290,14 +294,52 @@ if (-not $SkipInstaller) {
     throw "The Windows installer output is missing."
   }
   $installerPath = Join-Path $output "NexCode-Setup-$version-x64.exe"
+  $otaInstallerPath = Join-Path $output "Windows-Ota-Updata.exe"
+  $otaChecksumPath = Join-Path $output "Windows-Ota-Updata.exe.sha256"
+  $otaManifestPath = Join-Path $output "Windows-Ota-Updata.json"
+  $otaSignaturePath = Join-Path $output "Windows-Ota-Updata.sig"
   Assert-ChildPath -Parent $output -Child $installerPath
+  Assert-ChildPath -Parent $output -Child $otaInstallerPath
+  Assert-ChildPath -Parent $output -Child $otaChecksumPath
+  Assert-ChildPath -Parent $output -Child $otaManifestPath
+  Assert-ChildPath -Parent $output -Child $otaSignaturePath
   Copy-Item -LiteralPath $builtInstaller -Destination $installerPath -Force
+  Copy-Item -LiteralPath $builtInstaller -Destination $otaInstallerPath -Force
+  $otaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $otaInstallerPath).Hash.ToLowerInvariant()
+  $otaSize = (Get-Item -LiteralPath $otaInstallerPath).Length
+  $utf8NoBom = [Text.UTF8Encoding]::new($false)
+  [IO.File]::WriteAllText(
+    $otaChecksumPath,
+    "$otaHash  Windows-Ota-Updata.exe`n",
+    $utf8NoBom
+  )
+  $otaManifest = [ordered]@{
+    version = $version
+    file = "Windows-Ota-Updata.exe"
+    size = $otaSize
+    sha256 = $otaHash
+  }
+  [IO.File]::WriteAllText(
+    $otaManifestPath,
+    (($otaManifest | ConvertTo-Json -Compress) + "`n"),
+    $utf8NoBom
+  )
+
+  if (Test-Path -LiteralPath $otaSignaturePath) {
+    Remove-Item -LiteralPath $otaSignaturePath -Force
+  }
 }
 
 Write-Host "Windows desktop artifacts are ready:"
 Write-Host "  NexCode-windows-x64\NexCode.exe"
 Write-Host "  NexCode-windows-x64-portable.zip"
 if ($installerPath) { Write-Host "  NexCode-Setup-$version-x64.exe" }
+if ($otaInstallerPath) {
+  Write-Host "  Windows-Ota-Updata.exe"
+  Write-Host "  Windows-Ota-Updata.exe.sha256"
+  Write-Host "  Windows-Ota-Updata.json"
+  Write-Warning "OTA artifacts are unsigned; run sign-windows-ota.ps1 before publishing."
+}
 Write-Host "SHA-256:"
 Get-FileHash -Algorithm SHA256 -LiteralPath $portableZip | Select-Object Hash, @{ Name = "File"; Expression = { Split-Path -Leaf $_.Path } } | Format-Table -AutoSize
 if ($installerPath) {

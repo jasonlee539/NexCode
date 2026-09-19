@@ -19,6 +19,58 @@ interface ThreadDocument {
   markdown: string;
 }
 
+interface NativeWebViewBridge {
+  postMessage: (message: unknown) => void;
+  addEventListener: (type: "message", listener: (event: { data: unknown }) => void) => void;
+  removeEventListener: (type: "message", listener: (event: { data: unknown }) => void) => void;
+}
+
+interface NativeSaveResult {
+  type: "nexcode:save-markdown-result";
+  requestId: string;
+  status: "saved" | "cancelled" | "error";
+}
+
+let nativeSaveSequence = 0;
+
+function nativeWebViewBridge(): NativeWebViewBridge | null {
+  const host = window as typeof window & { chrome?: { webview?: NativeWebViewBridge } };
+  return host.chrome?.webview ?? null;
+}
+
+function isNativeSaveResult(value: unknown): value is NativeSaveResult {
+  if (!value || typeof value !== "object") return false;
+  const result = value as Partial<NativeSaveResult>;
+  return result.type === "nexcode:save-markdown-result"
+    && typeof result.requestId === "string"
+    && (result.status === "saved" || result.status === "cancelled" || result.status === "error");
+}
+
+function saveDocumentWithNativeBridge(bridge: NativeWebViewBridge, document: ThreadDocument): Promise<"saved" | "cancelled"> {
+  const requestId = `thread-export-${Date.now()}-${++nativeSaveSequence}`;
+  return new Promise((resolve, reject) => {
+    const onMessage = (event: { data: unknown }) => {
+      if (!isNativeSaveResult(event.data) || event.data.requestId !== requestId) return;
+      bridge.removeEventListener("message", onMessage);
+      if (event.data.status === "saved") resolve("saved");
+      else if (event.data.status === "cancelled") resolve("cancelled");
+      else reject(new Error("native export failed"));
+    };
+    bridge.addEventListener("message", onMessage);
+    try {
+      bridge.postMessage({
+        type: "nexcode:save-markdown",
+        requestId,
+        fileName: document.fileName,
+        content: document.markdown,
+      });
+    } catch (error) {
+      bridge.removeEventListener("message", onMessage);
+      reject(error);
+    }
+  });
+}
+
 async function fetchThreads(apiBase: string, status: ThreadFilter, query: string, signal: AbortSignal): Promise<ThreadListResponse> {
   const params = new URLSearchParams({ status, limit: "500" });
   if (query.trim()) params.set("q", query.trim());
@@ -74,11 +126,17 @@ export default function Threads({ apiBase }: { apiBase: string }) {
     }, 1_000);
   };
 
-  const exportThread = (thread: DesktopThreadSummary) => {
+  const exportThread = async (thread: DesktopThreadSummary, loadedDocument?: ThreadDocument) => {
     setExportingId(thread.id);
     setFeedback(null);
     try {
-      downloadDocument(thread);
+      const bridge = nativeWebViewBridge();
+      if (bridge) {
+        const result = await saveDocumentWithNativeBridge(bridge, loadedDocument ?? await fetchThreadDocument(thread));
+        if (result === "cancelled") return;
+      } else {
+        downloadDocument(thread);
+      }
       setFeedback({ message: t("threads.exportDone"), tone: "ok" });
     } catch {
       setFeedback({ message: t("threads.exportFailed"), tone: "err" });
@@ -106,7 +164,7 @@ export default function Threads({ apiBase }: { apiBase: string }) {
           <button type="button" className="btn btn-ghost btn-sm desktop-thread-view__back" onClick={() => { setViewer(null); setFeedback(null); }}>
             <IconChevron width={13} /> {t("threads.back")}
           </button>
-          <button type="button" className="btn btn-primary btn-sm" disabled={exportingId !== null} onClick={() => { exportThread(viewer.thread); }}>
+          <button type="button" className="btn btn-primary btn-sm" disabled={exportingId !== null} onClick={() => { void exportThread(viewer.thread, viewer.document); }}>
             <IconDownload width={13} /> {exportingId === viewer.thread.id ? t("common.loading") : t("threads.export")}
           </button>
         </div>
@@ -207,7 +265,7 @@ export default function Threads({ apiBase }: { apiBase: string }) {
                   <button type="button" className="btn btn-ghost btn-sm" disabled={viewingId !== null} onClick={() => { void viewThread(thread); }}>
                     <IconFileText width={13} /> {viewingId === thread.id ? t("common.loading") : t("threads.view")}
                   </button>
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={exportingId !== null} onClick={() => { exportThread(thread); }}>
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={exportingId !== null} onClick={() => { void exportThread(thread); }}>
                     <IconDownload width={13} /> {exportingId === thread.id ? t("common.loading") : t("threads.export")}
                   </button>
                 </div>

@@ -628,9 +628,14 @@ describe("GitHub Actions hardening", () => {
           "runs-on"?: string;
           permissions?: Record<string, string>;
         };
-        publish?: {
+        "build-windows-ota"?: {
           "runs-on"?: string;
           needs?: string;
+          permissions?: Record<string, string>;
+        };
+        publish?: {
+          "runs-on"?: string;
+          needs?: string[];
           permissions?: Record<string, string>;
         };
       };
@@ -645,7 +650,10 @@ describe("GitHub Actions hardening", () => {
       contents: "read",
     });
     
-    expect(release.jobs?.publish?.needs).toBe("validate-dispatch");
+    expect(release.jobs?.["build-windows-ota"]?.needs).toBe("validate-dispatch");
+    expect(release.jobs?.["build-windows-ota"]?.["runs-on"]).toBe("windows-latest");
+    expect(release.jobs?.["build-windows-ota"]?.permissions).toEqual({ contents: "read" });
+    expect(release.jobs?.publish?.needs).toEqual(["validate-dispatch", "build-windows-ota"]);
     expect(release.jobs?.publish?.["runs-on"]).toBe("ubuntu-latest");
     expect(release.jobs?.publish?.permissions).toEqual({
       contents: "write",
@@ -714,6 +722,8 @@ describe("GitHub Actions hardening", () => {
     expect(await readText(".github/actions/setup-project-bun/action.yml"))
       .toContain("oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6");
     expect(workflow).toContain("actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e");
+    expect(workflow).toContain("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a");
+    expect(workflow).toContain("actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c");
     expect(workflow).not.toMatch(/uses:\s+\S+@(?:v\d+|main|master)\b/);
 
     // Workflow-dispatch inputs must reach shell code via env, never by direct
@@ -797,6 +807,19 @@ describe("GitHub Actions hardening", () => {
     expect(releaseNotesBuilder).toContain("release changelog failed coverage validation");
 
     expect(workflow).toMatch(/gh release create[\s\S]*?--notes-file "\$notes_file"/);
+    expect(workflow).toContain("dist/Windows-Ota-Updata.exe");
+    expect(workflow).toContain("dist/Windows-Ota-Updata.exe.sha256");
+    expect(workflow).toContain("dist/Windows-Ota-Updata.json");
+    expect(workflow).toContain("dist/Windows-Ota-Updata.sig");
+    expect(workflow).toContain("secrets.WINDOWS_OTA_SIGNING_PRIVATE_KEY_B64");
+    expect(workflow).toContain("desktop/scripts/sign-windows-ota.ps1");
+    expect(workflow.indexOf("bun run desktop:build")).toBeLessThan(
+      workflow.indexOf("secrets.WINDOWS_OTA_SIGNING_PRIVATE_KEY_B64"),
+    );
+    expect(workflow).toContain("bun scripts/verify-windows-ota.ts");
+    expect(workflow).toContain('"$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.exe"');
+    expect(workflow).toContain('"$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.json"');
+    expect(workflow).toContain('"$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.sig"');
     expect(workflow).not.toContain("gh release edit");
     expect(workflow).not.toContain("--generate-notes");
 

@@ -50,11 +50,15 @@
     <Compile Include="Program.cs" />
     <Compile Include="RuntimeController.cs" />
     <Compile Include="SingleInstance.cs" />
+    <Compile Include="UpdateService.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
     <None Include="app.manifest" />
+    <EmbeddedResource Include="UpdateSigningPublicKey.xml">
+      <LogicalName>NexCode.Desktop.UpdateSigningPublicKey.xml</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />

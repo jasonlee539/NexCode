@@ -11,6 +11,7 @@ let previous: Record<(typeof globals)[number], unknown>;
 let testWindow: Window;
 let host: HTMLElement;
 let root: Root | null = null;
+let nativeMessage: Record<string, unknown> | null;
 
 const thread = {
   id: "thread-1",
@@ -47,6 +48,28 @@ beforeEach(() => {
   clearClientResourceStoresForTests();
   previous = Object.fromEntries(globals.map(key => [key, Reflect.get(globalThis, key)])) as typeof previous;
   testWindow = new Window({ url: "http://localhost/" });
+  nativeMessage = null;
+  const webMessageListeners = new Set<(event: { data: unknown }) => void>();
+  Reflect.set(testWindow, "chrome", {
+    webview: {
+      addEventListener: (_type: string, listener: (event: { data: unknown }) => void) => webMessageListeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: { data: unknown }) => void) => webMessageListeners.delete(listener),
+      postMessage: (message: Record<string, unknown>) => {
+        nativeMessage = message;
+        Promise.resolve().then(() => {
+          for (const listener of webMessageListeners) {
+            listener({
+              data: {
+                type: "nexcode:save-markdown-result",
+                requestId: message.requestId,
+                status: "saved",
+              },
+            });
+          }
+        });
+      },
+    },
+  });
   testWindow.localStorage.setItem("nxc-lang", "zh");
   Object.defineProperty(testWindow.navigator, "language", { configurable: true, value: "zh-CN" });
   const mockFetch = async (input: string | URL | Request) => {
@@ -86,7 +109,7 @@ afterEach(async () => {
   await testWindow.happyDOM?.close?.();
 });
 
-test("views a thread as rendered Markdown, returns to the list, and starts a native Markdown download", async () => {
+test("views a thread and sends Markdown to the native save dialog", async () => {
   const { createRoot } = await import("react-dom/client");
   await act(async () => {
     root = createRoot(host);
@@ -109,9 +132,12 @@ test("views a thread as rendered Markdown, returns to the list, and starts a nat
     button("导出").click();
     await flush();
   });
-  const download = testWindow.document.body.querySelector("a[download]") as HTMLAnchorElement | null;
-  expect(download).not.toBeNull();
-  expect(download?.pathname).toBe("/api/desktop/threads/thread-1/export");
-  expect(download?.search).toBe("?download=1");
-  expect(host.textContent).toContain("请在保存对话框中选择文件夹和 Markdown 文件名。");
+  expect(nativeMessage).toEqual({
+    type: "nexcode:save-markdown",
+    requestId: expect.stringContaining("thread-export-"),
+    fileName: "Demo-thread.md",
+    content: "# Demo thread\n\n## User\n\nBuild the feature\n\n## Assistant\n\nDone.\n",
+  });
+  expect(testWindow.document.body.querySelector("a[download]")).toBeNull();
+  expect(host.textContent).toContain("线程已成功导出。");
 });

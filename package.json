@@ -1,6 +1,6 @@
 {
   "name": "nexcode-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "NexCode local desktop app for Codex and ChatGPT accounts, threads, and Skills",
   "type": "module",

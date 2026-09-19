@@ -19,6 +19,9 @@ The command writes these release artifacts to `dist/`:
 - `NexCode-windows-x64-portable.zip` — portable distribution archive.
 - `NexCode-Setup-<version>-x64.exe` — single-file installer with uninstall,
   Start menu, desktop shortcut, and `nexcode://` protocol registration.
+- `Windows-Ota-Updata.exe`, `Windows-Ota-Updata.exe.sha256`,
+  `Windows-Ota-Updata.json`, and `Windows-Ota-Updata.sig` — fixed-name,
+  signed GitHub Release assets used by the installed app's OTA flow.
 
 Use `npm run desktop:portable` to omit the installer. Windows builds
 require Visual Studio 2019 or newer with the .NET Framework 4.7.2 targeting
@@ -49,3 +52,20 @@ The dashboard updates its selected account only after that transaction succeeds.
 After OAuth succeeds, the callback returns to NexCode through the registered
 `nexcode://oauth-complete` application URL.
 Runtime data is stored under `~/.nexcode` unless `NEXCODE_HOME` is set.
+
+Thread Markdown export uses a native Windows save dialog and writes through the
+desktop process, so users can select any directory writable by their Windows
+account without granting WebView2 download permission. Installed copies check
+the latest `jasonlee539/NexCode` GitHub Release after startup. When a newer
+stable version exists, the app offers to download `Windows-Ota-Updata.exe`,
+requires the matching signed manifest and SHA-256 asset, installs it per-user,
+and restarts NexCode. The embedded RSA public key is
+`desktop/windows/NexCode/UpdateSigningPublicKey.xml` (SHA-256 fingerprint
+`0d9d65c176ee402a7de1572864202d59d8674962dde1d614934aeb8ff72ca553`).
+The private key must never be committed. Release automation reads its base64
+encoding from the `WINDOWS_OTA_SIGNING_PRIVATE_KEY_B64` GitHub Actions secret;
+local signed builds pass the private XML path with
+`desktop/scripts/sign-windows-ota.ps1 -PrivateKeyPath <path>` after the normal
+desktop build. The build and signing steps stay separate so dependency and
+compiler processes never run while the private key is present.
+The tray menu also provides a manual update check.

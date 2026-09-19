@@ -69,8 +69,86 @@ jobs:
             process.exit(1);
           }
           NODE
-  publish:
+  build-windows-ota:
     needs: validate-dispatch
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Verify dispatched SHA and version
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.expected-sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ($env:GITHUB_SHA -ne $env:EXPECTED_SHA) {
+            throw "Branch moved after the release audit; refusing to build an unaudited Windows package."
+          }
+          $packageVersion = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($packageVersion -ne $env:RELEASE_VERSION) {
+            throw "package.json version does not match the requested release version."
+          }
+
+      - name: Setup project Bun
+        uses: ./.github/actions/setup-project-bun
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Windows OTA package
+        run: bun run desktop:build
+
+      - name: Sign Windows OTA package
+        shell: pwsh
+        env:
+          OTA_SIGNING_PRIVATE_KEY_B64: ${{ secrets.WINDOWS_OTA_SIGNING_PRIVATE_KEY_B64 }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:OTA_SIGNING_PRIVATE_KEY_B64)) {
+            throw "WINDOWS_OTA_SIGNING_PRIVATE_KEY_B64 is required for a release build."
+          }
+          $keyPath = Join-Path $env:RUNNER_TEMP "nexcode-ota-private-key.xml"
+          try {
+            $keyBytes = [Convert]::FromBase64String($env:OTA_SIGNING_PRIVATE_KEY_B64)
+            Remove-Item Env:OTA_SIGNING_PRIVATE_KEY_B64
+            [IO.File]::WriteAllBytes($keyPath, $keyBytes)
+            [Array]::Clear($keyBytes, 0, $keyBytes.Length)
+            & ./desktop/scripts/sign-windows-ota.ps1 `
+              -PrivateKeyPath $keyPath `
+              -ExpectedVersion $env:RELEASE_VERSION
+          } finally {
+            Remove-Item Env:OTA_SIGNING_PRIVATE_KEY_B64 -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $keyPath) {
+              Remove-Item -LiteralPath $keyPath -Force
+            }
+          }
+
+      - name: Verify Windows OTA package
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bun scripts/verify-windows-ota.ts dist $env:RELEASE_VERSION
+
+      - name: Upload Windows OTA package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-ota-release-assets
+          path: |
+            dist/Windows-Ota-Updata.exe
+            dist/Windows-Ota-Updata.exe.sha256
+            dist/Windows-Ota-Updata.json
+            dist/Windows-Ota-Updata.sig
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    needs: [validate-dispatch, build-windows-ota]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -83,6 +161,12 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
+
+      - name: Download Windows OTA package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-ota-release-assets
+          path: .release-assets
 
       - name: Verify dispatched SHA
         env:
@@ -99,6 +183,11 @@ jobs:
       # nexcode is bun-native (the prepublishOnly audit, GUI build, and typecheck run under bun).
       - name: Setup project Bun
         uses: ./.github/actions/setup-project-bun
+
+      - name: Verify downloaded Windows OTA package
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bun scripts/verify-windows-ota.ts .release-assets "$RELEASE_VERSION"
 
       # node + npm perform the actual publish. registry-url points npm at the public registry.
       - name: Setup Node
@@ -378,4 +467,9 @@ jobs:
           fi
 
           gh release create "$release_tag" --target "$GITHUB_SHA" --title "$release_tag" \
-            --notes-file "$notes_file" ${prerelease_flag:+$prerelease_flag}
+            --notes-file "$notes_file" \
+            "$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.exe" \
+            "$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.exe.sha256" \
+            "$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.json" \
+            "$GITHUB_WORKSPACE/.release-assets/Windows-Ota-Updata.sig" \
+            ${prerelease_flag:+$prerelease_flag}
