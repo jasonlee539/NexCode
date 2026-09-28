@@ -1,6 +1,6 @@
 {
   "name": "nexcode-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "NexCode local desktop app for Codex and ChatGPT accounts, threads, and Skills",
   "type": "module",
@@ -61,6 +61,8 @@
     "desktop:build": "bash desktop/scripts/build-app.sh",
     "desktop:dmg": "bash desktop/scripts/build-dmg.sh",
     "desktop:portable": "bash desktop/scripts/build-portable.sh",
+    "desktop:ota": "bash desktop/scripts/build-macos-ota.sh",
+    "desktop:test": "bash desktop/scripts/test-macos-ota.sh",
     "desktop:open": "open dist/NexCode.app"
   },
   "dependencies": {

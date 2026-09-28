@@ -81,9 +81,21 @@ CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFT_MODULECACHE_PATH="$MODULE_CACHE" s
   -framework AppKit \
   -framework WebKit \
   "$ROOT_DIR/desktop/macos/Sources/NexCodeApp.swift" \
+  "$ROOT_DIR/desktop/macos/Sources/UpdateService.swift" \
   -o "$MACOS_DIR/NexCode"
 
+CLANG_MODULE_CACHE_PATH="$MODULE_CACHE" SWIFT_MODULECACHE_PATH="$MODULE_CACHE" swiftc \
+  -parse-as-library -sdk "$MACOS_SDK" -target "$(uname -m)-apple-macos13.0" -O \
+  -framework AppKit "$ROOT_DIR/desktop/macos/Sources/UpdateInstaller.swift" \
+  -o "$MACOS_DIR/NexCodeUpdater"
+
 cp "$ROOT_DIR/desktop/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
+git -C "$ROOT_DIR" rev-parse HEAD > "$RESOURCES_DIR/SourceCommit.txt"
+VERSION="$("$BUN_BIN" -e 'console.log(require(process.argv[1]).version)' "$ROOT_DIR/package.json")"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$CONTENTS_DIR/Info.plist"
+"$BUN_BIN" -e 'const fs=require("fs"); fs.writeFileSync(process.argv[2], Buffer.from(fs.readFileSync(process.argv[1], "utf8").trim(), "base64"))' \
+  "$ROOT_DIR/desktop/macos/UpdateSigningPublicKey.txt" "$RESOURCES_DIR/UpdateSigningPublicKey.bin"
 cp "$BUN_BIN" "$RUNTIME_DIR/bin/bun"
 chmod 755 "$RUNTIME_DIR/bin/bun" "$MACOS_DIR/NexCode"
 

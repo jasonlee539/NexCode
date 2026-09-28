@@ -30,6 +30,8 @@ export interface CodexAccountCredentials {
 export interface CodexAccountCredentialRecord {
   credential?: CodexAccountCredentials;
   generation: number;
+  /** Pool credential generation last materialized into the native-profile vault. */
+  nativeProfileCredentialGeneration?: number;
   refreshGrantFingerprint?: string;
   deletedAt?: number;
   replacedAt?: number;

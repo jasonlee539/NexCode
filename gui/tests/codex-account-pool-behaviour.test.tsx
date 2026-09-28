@@ -37,6 +37,7 @@ let activePinnedAccountId: string | null = null;
 let omitPinnedAccountId = false;
 let activeGetId: string | null = null;
 let deleteCatalogRefreshPending = false;
+let lastActivePutBody: { accountId: string | null; confirmedStopped?: boolean } | null = null;
 
 beforeEach(() => {
   previous = Object.fromEntries(globals.map((k) => [k, Reflect.get(globalThis, k)])) as typeof previous;
@@ -65,6 +66,7 @@ beforeEach(() => {
   omitPinnedAccountId = false;
   activeGetId = null;
   deleteCatalogRefreshPending = false;
+  lastActivePutBody = null;
   accounts = [{ id: "a1", email: "account-one", isMain: true, paused: false, priority: 0, hasCredential: true, quota: null }];
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -137,7 +139,8 @@ beforeEach(() => {
       }
       if (path.startsWith("codex-auth/active")) {
         if (init?.method === "PUT") {
-          const body = JSON.parse(String(init.body)) as { accountId: string | null };
+          const body = JSON.parse(String(init.body)) as { accountId: string | null; confirmedStopped?: boolean };
+          lastActivePutBody = body;
           const putGate = nextActivePutGate;
           nextActivePutGate = null;
           if (putGate) await putGate;
@@ -517,6 +520,16 @@ test("an accepted manual switch moves the pin before reconciliation lands", asyn
     releaseActive();
     await new Promise((resolve) => setTimeout(resolve, 30));
   });
+});
+
+test("a desktop-confirmed switch tells the server that Codex processes were stopped", async () => {
+  const seen = await mountController();
+
+  await act(async () => {
+    expect(await seen.current!.switchAccount("a2", { confirmedStopped: true })).toEqual({ ok: true, activeId: "a2" });
+  });
+
+  expect(lastActivePutBody).toEqual({ accountId: "a2", confirmedStopped: true });
 });
 
 test("the main sentinel writes through to its distinct account row", async () => {

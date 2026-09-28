@@ -86,6 +86,7 @@ export default defineConfig({
           translations: { fr: "Guides", ko: "가이드", "zh-CN": "指南", "zh-TW": "指南", ru: "Руководства", ja: "ガイド", tr: "Kılavuzlar" },
           items: [
             { label: "Providers", translations: { fr: "Fournisseurs", ko: "프로바이더", "zh-CN": "提供商", "zh-TW": "供應商", ru: "Провайдеры", ja: "プロバイダー", tr: "Sağlayıcılar" }, slug: "guides/providers" },
+            { label: "macOS desktop updates", translations: { "zh-CN": "macOS 桌面版更新" }, slug: "guides/macos-updates" },
             { label: "Factory Droid Bridge", translations: { fr: "Pont Factory Droid", ko: "Factory Droid 브리지" }, slug: "guides/factory-droid" },
             { label: "Model Routing", translations: { fr: "Routage des modèles", ko: "모델 라우팅", "zh-CN": "模型路由", "zh-TW": "模型路由", ru: "Маршрутизация моделей", ja: "モデルルーティング", tr: "Model Yönlendirme" }, slug: "guides/model-routing" },
             { label: "Codex Integration", translations: { fr: "Intégration de Codex", ko: "Codex 통합", "zh-CN": "Codex 集成", "zh-TW": "Codex 整合", ru: "Интеграция с Codex", ja: "Codex 連携", tr: "Codex Entegrasyonu" }, slug: "guides/codex-integration" },

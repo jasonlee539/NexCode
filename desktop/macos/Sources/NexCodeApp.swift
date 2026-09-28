@@ -463,6 +463,9 @@ private final class RuntimeController {
                   (object["status"] as? String) == "ok" else { return }
             if let expectedPID = candidate.pid, (object["pid"] as? Int) != expectedPID { return }
             runtimeMode = object["runtimeMode"] as? String ?? "legacy-proxy"
+            if runtimeMode == "management", object["version"] as? String != MacUpdateService.currentVersion {
+                runtimeMode = "outdated-management"
+            }
         }
         task.resume()
         if semaphore.wait(timeout: .now() + 1) == .timedOut { task.cancel() }
@@ -479,7 +482,7 @@ private final class RuntimeController {
     }
 }
 
-private final class AppWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+private final class AppWindowController: NSWindowController, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
     var onRetry: (() -> Void)?
 
     private let webView: WKWebView
@@ -489,6 +492,7 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
     private let progress = NSProgressIndicator()
     private let retryButton = NSButton(title: "重新启动", target: nil, action: nil)
     private var dashboardURL: URL?
+    private var savingMarkdown = false
 
     init() {
         let preferences = WKWebpagePreferences()
@@ -507,6 +511,18 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
             defer: false
         )
         super.init(window: window)
+        configuration.userContentController.add(self, name: "nexcode")
+        configuration.userContentController.addUserScript(WKUserScript(source: """
+          (() => {
+            const listeners = new Set();
+            window.nexcodeNative = {
+              postMessage: message => window.webkit.messageHandlers.nexcode.postMessage(message),
+              addEventListener: (type, listener) => { if (type === 'message') listeners.add(listener); },
+              removeEventListener: (type, listener) => { if (type === 'message') listeners.delete(listener); },
+              receive: data => { for (const listener of listeners) listener({ data }); }
+            };
+          })();
+          """, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         configureWindow(window)
     }
 
@@ -822,6 +838,34 @@ private final class AppWindowController: NSWindowController, WKNavigationDelegat
 
     func downloadDidFinish(_ download: WKDownload) {}
 
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, let dashboardURL,
+              message.frameInfo.securityOrigin.protocol == dashboardURL.scheme,
+              message.frameInfo.securityOrigin.host == dashboardURL.host,
+              message.frameInfo.securityOrigin.port == dashboardURL.port,
+              let body = message.body as? [String: Any],
+              body["type"] as? String == "nexcode:save-markdown",
+              let requestID = body["requestId"] as? String, requestID.count <= 128,
+              let name = body["fileName"] as? String,
+              let content = body["content"] as? String else { return }
+        let reply: (String) -> Void = { [weak self] status in
+            guard let data = try? JSONSerialization.data(withJSONObject: [
+                "type": "nexcode:save-markdown-result", "requestId": requestID, "status": status
+            ]), let json = String(data: data, encoding: .utf8) else { return }
+            self?.webView.evaluateJavaScript("window.nexcodeNative?.receive(\(json))", completionHandler: nil)
+        }
+        guard !savingMarkdown, content.utf8.count <= 32 * 1024 * 1024, let window else { reply("error"); return }
+        savingMarkdown = true
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = URL(fileURLWithPath: name).lastPathComponent
+        panel.beginSheetModal(for: window) { [weak self] response in
+            defer { self?.savingMarkdown = false }
+            guard response == .OK, let url = panel.url else { reply("cancelled"); return }
+            do { try content.write(to: url, atomically: true, encoding: .utf8); reply("saved") }
+            catch { reply("error") }
+        }
+    }
+
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         let alert = NSAlert()
         alert.messageText = "下载失败"
@@ -836,6 +880,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appWindow = AppWindowController()
     private var waitingForTermination = false
     private var statusItem: NSStatusItem?
+    private let updater = MacUpdateService()
+    private var updateBusy = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         configureMenu()
@@ -844,9 +890,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         appWindow.showWindow(nil)
         appWindow.showLoading()
         appWindow.onRetry = { [weak self] in self?.runtime.restart() }
-        runtime.onReady = { [weak self] url in self?.appWindow.showDashboard(url) }
+        runtime.onReady = { [weak self] url in
+            self?.appWindow.showDashboard(url)
+            if let receipt = ProcessInfo.processInfo.environment["NEXCODE_UPDATE_RECEIPT"] {
+                try? Data("ready".utf8).write(to: URL(fileURLWithPath: receipt), options: .atomic)
+                unsetenv("NEXCODE_UPDATE_RECEIPT")
+            }
+        }
         runtime.onFailure = { [weak self] message in self?.appWindow.showError(message) }
         runtime.start()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in self?.checkForUpdates(manual: false) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -875,6 +928,50 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func reloadDashboard() { appWindow.reloadDashboard() }
 
+    @objc private func manualUpdateCheck() { checkForUpdates(manual: true) }
+
+    private func checkForUpdates(manual: Bool) {
+        guard !updateBusy, !waitingForTermination else { return }
+        updateBusy = true
+        Task { @MainActor in
+            var acceptedUpdate = false
+            defer { updateBusy = false }
+            do {
+                guard let release = try await updater.check() else {
+                    if manual { updateMessage("当前没有可用的 Mac 更新", "当前版本：\(MacUpdateService.currentVersion)") }
+                    return
+                }
+                guard !waitingForTermination else { return }
+                let alert = NSAlert()
+                alert.messageText = "NexCode \(release.version) 可用"
+                alert.informativeText = "下载并验证签名后，NexCode 将退出、安装更新并重新启动。"
+                alert.addButton(withTitle: "下载并更新")
+                alert.addButton(withTitle: "稍后")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+                acceptedUpdate = true
+                let stage = try await updater.prepare(release)
+                guard !waitingForTermination else { try? FileManager.default.removeItem(at: stage); return }
+                let helper = Process()
+                helper.executableURL = stage.appendingPathComponent("NexCodeUpdater")
+                helper.arguments = [String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundleURL.resolvingSymlinksInPath().path, stage.path]
+                helper.standardOutput = FileHandle.nullDevice
+                helper.standardError = FileHandle.nullDevice
+                do { try helper.run() } catch { try? FileManager.default.removeItem(at: stage); throw error }
+                NSApp.terminate(nil)
+            } catch {
+                // Automatic checks remain quiet when offline. Manual checks show the cause.
+                if manual || acceptedUpdate { updateMessage("无法完成更新", error.localizedDescription) }
+            }
+        }
+    }
+
+    private func updateMessage(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.runModal()
+    }
+
     @objc private func showFromStatusItem() {
         NSApp.activate(ignoringOtherApps: true)
         appWindow.showWindow(nil)
@@ -888,7 +985,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "NexCode",
-            .applicationVersion: "1.0.0",
+            .applicationVersion: MacUpdateService.currentVersion,
             .version: "Codex Manager",
             .credits: NSAttributedString(string: "Local Codex account and workspace manager. Model requests connect directly to OpenAI.\nOpenCodex-derived portions are available under the MIT License."),
         ])
@@ -904,6 +1001,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let about = NSMenuItem(title: "关于 NexCode", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         appMenu.addItem(about)
+        let update = NSMenuItem(title: "检查更新…", action: #selector(manualUpdateCheck), keyEquivalent: "")
+        update.target = self
+        appMenu.addItem(update)
         appMenu.addItem(.separator())
         appMenu.addItem(NSMenuItem(title: "隐藏 NexCode", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
         let hideOthers = NSMenuItem(title: "隐藏其他应用", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -959,6 +1059,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let show = NSMenuItem(title: "显示 NexCode", action: #selector(showFromStatusItem), keyEquivalent: "")
         show.target = self
         menu.addItem(show)
+        let update = NSMenuItem(title: "检查更新…", action: #selector(manualUpdateCheck), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "完全退出 NexCode", action: #selector(quitCompletely), keyEquivalent: "q")
         quit.target = self
@@ -968,8 +1071,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-let nexCodeApp = NSApplication.shared
-nexCodeApp.setActivationPolicy(.regular)
-private let nexCodeDelegate = AppDelegate()
-nexCodeApp.delegate = nexCodeDelegate
-nexCodeApp.run()
+@main
+private enum NexCodeMain {
+    static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.regular)
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
+    }
+}

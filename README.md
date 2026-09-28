@@ -87,13 +87,16 @@ NexCode 的线程和用量页面只读取本机 Codex 记录。软件不会把�
 
 | 平台 | 架构 | 下载 | 安装方式 |
 | --- | --- | --- | --- |
-| macOS 13+ | Apple Silicon（arm64） | [DMG 安装版](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode.dmg) · [便携 ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-portable-macos-arm64.zip) | 打开 DMG 并拖入“应用程序”，或解压 ZIP 后直接运行 |
+| macOS 13+ | Apple Silicon（arm64） | [DMG 安装版](https://github.com/jasonlee539/NexCode/releases/download/v1.0.1/NexCode.dmg) · [便携 ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.1/NexCode-portable-macos-arm64.zip) | 打开 DMG 并拖入“应用程序”，或解压 ZIP 后直接运行 |
 | Windows | x64 | [Setup EXE](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-Setup-1.0.0-x64.exe) | 运行安装程序并按提示完成安装 |
 | Ubuntu 22.04+ | amd64 | [DEB 安装包](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/nexcode-ubuntu_1.0.0_amd64.deb) | 下载后运行 `sudo apt install ./nexcode-ubuntu_1.0.0_amd64.deb` |
 
 全部版本和更新记录见 [GitHub Releases](https://github.com/jasonlee539/NexCode/releases)。
 
 ### 从源码构建 macOS 版
+
+Mac 1.0.1 支持启动检查更新、菜单“检查更新…”和签名 OTA 升级，并同步 Windows 的账号切换与原生 Markdown 导出改进。
+旧版 1.0.0 需先手动安装 1.0.1，此后可在应用内升级。详见 [Mac 更新说明](desktop/README.md)。
 
 从源码构建需要 macOS 13 或更高版本、Node.js 18+ 和 Apple Command Line Tools：
 
@@ -193,13 +196,18 @@ model requests directly to OpenAI with the active native login.
 
 | Platform | Architecture | Download | Installation |
 | --- | --- | --- | --- |
-| macOS 13+ | Apple Silicon (arm64) | [DMG](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode.dmg) · [Portable ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-portable-macos-arm64.zip) | Open the DMG and drag NexCode to Applications, or extract the ZIP and run the app |
+| macOS 13+ | Apple Silicon (arm64) | [DMG](https://github.com/jasonlee539/NexCode/releases/download/v1.0.1/NexCode.dmg) · [Portable ZIP](https://github.com/jasonlee539/NexCode/releases/download/v1.0.1/NexCode-portable-macos-arm64.zip) | Open the DMG and drag NexCode to Applications, or extract the ZIP and run the app |
 | Windows | x64 | [Setup EXE](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/NexCode-Setup-1.0.0-x64.exe) | Run the installer and follow its prompts |
 | Ubuntu 22.04+ | amd64 | [DEB package](https://github.com/jasonlee539/NexCode/releases/download/v1.0.0/nexcode-ubuntu_1.0.0_amd64.deb) | Download, then run `sudo apt install ./nexcode-ubuntu_1.0.0_amd64.deb` |
 
 See [GitHub Releases](https://github.com/jasonlee539/NexCode/releases) for all builds and release notes.
 
 ### Build the macOS edition from source
+
+Mac 1.0.1 adds startup/manual update checks, signed OTA installation, and the
+Windows account-switching and native Markdown-export improvements. Install
+1.0.1 manually once when upgrading from 1.0.0; subsequent updates can run in the
+app. See the [Mac update guide](desktop/README.md).
 
 Building from source requires macOS 13 or newer, Node.js 18+, and Apple Command
 Line Tools:
