@@ -1,6 +1,6 @@
 {
   "name": "nexcode-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "NexCode Ubuntu desktop account and usage manager for Codex",
   "type": "module",
@@ -62,7 +62,9 @@
     "desktop:dmg": "bash desktop/scripts/build-dmg.sh",
     "desktop:open": "open dist/NexCode.app",
     "ubuntu:deb": "bash desktop/linux/build-deb.sh",
-    "ubuntu:run": "python3 desktop/linux/nexcode-ubuntu.py"
+    "ubuntu:run": "python3 desktop/linux/nexcode-ubuntu.py",
+    "ubuntu:test": "python3 -m unittest discover -s desktop/linux/tests -v",
+    "ubuntu:sign": "python3 desktop/linux/sign_ota.py"
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.14.0",

@@ -51,6 +51,7 @@ function isCredential(value: unknown): value is CodexAccountCredentials {
 function isCredentialRecord(value: unknown): value is CodexAccountCredentialRecord {
   return isObject(value)
     && typeof value.generation === "number"
+    && (value.nativeProfileCredentialGeneration === undefined || typeof value.nativeProfileCredentialGeneration === "number")
     && (value.credential === undefined || isCredential(value.credential))
     && (value.refreshGrantFingerprint === undefined || typeof value.refreshGrantFingerprint === "string")
     && (value.deletedAt === undefined || typeof value.deletedAt === "number")
@@ -191,6 +192,17 @@ export function readCodexAccountRecord(id: string): CodexAccountCredentialRecord
 export function isCodexAccountGenerationLive(id: string, generation: number): boolean {
   const record = readCodexAccountRecord(id);
   return !!record?.credential && record.deletedAt == null && record.generation === generation;
+}
+
+export function markNativeProfileCredentialGeneration(id: string, generation: number): boolean {
+  return withCredentialMutationLockSync(() => {
+    const store = loadCodexAccountRecordStore();
+    const current = store[id];
+    if (!current || current.generation !== generation || current.deletedAt != null || !current.credential) return false;
+    store[id] = { ...current, nativeProfileCredentialGeneration: generation };
+    persist(store);
+    return true;
+  });
 }
 
 export function saveCodexAccountCredentialIfGeneration(

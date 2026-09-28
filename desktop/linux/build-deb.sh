@@ -87,10 +87,10 @@ Version: $DEB_VERSION
 Section: devel
 Priority: optional
 Architecture: $DEB_ARCH
-Depends: python3 (>= 3.8), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, gir1.2-webkit2-4.0 | gir1.2-webkit2-4.1, xdg-utils, libc6 (>= 2.31), libstdc++6
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1, gir1.2-webkit2-4.0 | gir1.2-webkit2-4.1, xdg-utils, openssl (>= 3.0), policykit-1, libc6 (>= 2.31), libstdc++6
 Recommends: gnome-shell-extension-appindicator
 Maintainer: NexCode Maintainers <maintainers@example.com>
-Homepage: https://github.com/lidge-jun/nexcode
+Homepage: https://github.com/jasonlee539/NexCode
 Description: Ubuntu desktop account manager for Codex
  NexCode manages native Codex accounts, usage and local settings. Its loopback
  service is management-only; Codex model traffic connects directly to OpenAI.
@@ -112,6 +112,8 @@ rsync -a "$ROOT_DIR/assets/" "$RUNTIME_DIR/assets/"
 install -m 0644 "$ROOT_DIR/package.json" "$ROOT_DIR/LICENSE" "$ROOT_DIR/NOTICE" "$ROOT_DIR/AGENTS_INSTALL.md" "$RUNTIME_DIR/"
 
 install -m 0755 "$SCRIPT_DIR/nexcode-ubuntu.py" "$PACKAGE_ROOT/usr/lib/nexcode-ubuntu/nexcode-ubuntu.py"
+install -m 0644 "$SCRIPT_DIR/ota_update.py" "$SCRIPT_DIR/native_export.py" "$SCRIPT_DIR/UpdateSigningPublicKey.pem" "$PACKAGE_ROOT/usr/lib/nexcode-ubuntu/"
+git -C "$ROOT_DIR" rev-parse HEAD > "$PACKAGE_ROOT/usr/lib/nexcode-ubuntu/SourceCommit.txt"
 install -m 0755 "$SCRIPT_DIR/nexcode-ubuntu" "$PACKAGE_ROOT/usr/bin/nexcode-ubuntu"
 install -m 0755 "$SCRIPT_DIR/nxc" "$PACKAGE_ROOT/usr/bin/nxc"
 ln -s nxc "$PACKAGE_ROOT/usr/bin/nexcode"
@@ -161,3 +163,5 @@ mkdir -p "$OUTPUT_DIR"
 OUTPUT_PATH="$OUTPUT_DIR/${PACKAGE_NAME}_${DEB_VERSION}_${DEB_ARCH}.deb"
 dpkg-deb --build --root-owner-group "$PACKAGE_ROOT" "$OUTPUT_PATH"
 printf 'Built %s\n' "$OUTPUT_PATH"
+install -m 0644 "$OUTPUT_PATH" "$OUTPUT_DIR/Ubuntu-Ota-Updata-${DEB_ARCH}.deb"
+printf 'OTA package: %s/Ubuntu-Ota-Updata-%s.deb (sign before publishing)\n' "$OUTPUT_DIR" "$DEB_ARCH"

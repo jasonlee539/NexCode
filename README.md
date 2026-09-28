@@ -1,5 +1,9 @@
 # NexCode
 
+当前分支为 **Ubuntu 桌面版 1.0.1**。构建、安装与发布步骤见 [UBUNTU.md](UBUNTU.md)。
+本版新增带签名验证的 OTA 更新、原生导出保存对话框，并同步 Windows 的账号切换和重新登录体验。
+从 1.0.0 升级需要先手动安装一次 `.deb`，之后可从窗口或托盘菜单检查更新。
+
 NexCode 是一款 Codex 本地管理桌面软件，用来管理 Codex CLI/App 的账号、用量、
 会话与本地设置。模型请求始终由 Codex 直接连接 OpenAI，不经过 NexCode 的本地端口。
 
@@ -13,20 +17,20 @@ NexCode 是一款 Codex 本地管理桌面软件，用来管理 Codex CLI/App �
 
 ## 本地构建
 
-需要 macOS 13 或更高版本、Node.js 18+ 和 Apple Command Line Tools。
+需要 Ubuntu 22.04 或更高版本、Node.js 18+、GTK 3、WebKitGTK 和 Debian 打包工具。
 
 Source development requires the `bun` CLI on your `PATH`. This is separate from the published npm package's bundled Bun runtime, which is used only by installed `nxc` commands.
 
 ```bash
-npm install --no-audit --no-fund
-npm run desktop:build
-open dist/NexCode.app
+npm ci
+npm run ubuntu:deb
+sudo apt install ./dist/nexcode-ubuntu_1.0.1_amd64.deb
+nexcode-ubuntu
 ```
 
-构建产物是 `dist/NexCode.app`；运行 `npm run desktop:dmg` 还会生成可拖入
-“应用程序”目录的 `dist/NexCode.dmg`。应用包内包含 Bun、代理源码、生产 GUI 和运行时
-依赖，不会读取相邻的 `opencodex` 目录；移动或删除参考目录后仍可独立运行。
-日常使用直接双击 `NexCode.app`：管理界面由应用内置的 WebKit 窗口承载，不会
+构建产物是 `dist/nexcode-ubuntu_<version>_<architecture>.deb`，同时生成待签名的 OTA 包。
+应用包内包含 Bun、管理服务源码、生产 GUI 和运行时依赖，不依赖相邻项目目录。
+日常从 Ubuntu 应用菜单启动 NexCode：管理界面由应用内置的 WebKitGTK 窗口承载，不会
 跳转到浏览器。桌面侧栏固定保留仪表盘、账号、线程、用量、Skills、维护和设置；
 Provider、Claude 与图像相关界面不会进入桌面产品。只有 ChatGPT OAuth 授权页会打开
 系统浏览器，完成后会自动唤回 NexCode 并继续账号验证。应用内部的回环服务只用于
@@ -47,7 +51,7 @@ node bin/nxc.mjs --help
 
 ## 源码结构
 
-- `desktop/`：macOS 原生宿主、品牌资源和 `.app` 构建脚本。
+- `desktop/linux/`：Ubuntu 原生宿主、OTA 签名工具与 `.deb` 构建脚本。
 - `gui/`：React + Vite 管理界面。
 - `src/`：Bun TypeScript 代理、Provider、路由、集成和管理 API。
 - `tests/`：核心与 GUI 回归测试。

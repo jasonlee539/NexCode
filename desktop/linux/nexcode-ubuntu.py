@@ -8,11 +8,15 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import Optional
 from urllib.parse import urlencode, urlparse
 from urllib.request import ProxyHandler, build_opener
+
+from native_export import parse_export_message, save_markdown
+from ota_update import check_for_update, prepare_update
 
 # WebKitGTK's accelerated compositor can produce a fully interactive but blank
 # surface with some Mesa/NVIDIA and X11/Wayland combinations. The dashboard does
@@ -169,6 +173,10 @@ class NexCodeApplication(Gtk.Application):
         self.cancel = threading.Event()
         self.pending_oauth_return = False
         self.log_handle = None
+        self.update_busy = False
+        self.installing_update = False
+        self.export_busy = False
+        self.automatic_update_started = False
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         for argument in command_line.get_arguments()[1:]:
@@ -206,6 +214,9 @@ class NexCodeApplication(Gtk.Application):
         header.set_title(APP_NAME)
         header.set_subtitle("Ubuntu")
         header.set_show_close_button(True)
+        self.update_button = Gtk.Button.new_with_label("Check for Updates")
+        self.update_button.connect("clicked", lambda _button: self._check_updates(True))
+        header.pack_end(self.update_button)
         self.window.set_titlebar(header)
 
         self.stack = Gtk.Stack()
@@ -214,6 +225,10 @@ class NexCodeApplication(Gtk.Application):
         self.stack.add_named(self._error_view(), "error")
 
         self.webview = WebKit2.WebView()
+        manager = self.webview.get_user_content_manager()
+        manager.connect("script-message-received::nexcode", self._export_message)
+        manager.register_script_message_handler("nexcode")
+        self.webview.get_context().connect("download-started", self._download_started)
         self.webview.connect("decide-policy", self._decide_policy)
         self.webview.connect("load-failed", self._load_failed)
         self.webview.connect("web-process-terminated", self._web_process_terminated)
@@ -278,6 +293,8 @@ class NexCodeApplication(Gtk.Application):
             )
             cache_dir = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "nexcode-ubuntu"
             cache_dir.mkdir(parents=True, exist_ok=True)
+            if self.log_handle is not None:
+                self.log_handle.close()
             self.log_handle = (cache_dir / "desktop.log").open("ab", buffering=0)
             # Upgrades can leave the previous proxy-capable runtime alive. Stop
             # that NexCode-owned process before launching the management-only
@@ -329,10 +346,183 @@ class NexCodeApplication(Gtk.Application):
         if self.cancel.is_set() or self.webview is None or self.stack is None:
             return GLib.SOURCE_REMOVE
         self.runtime_url = url
+        self._install_export_bridge(url)
         self.webview.load_uri(url)
         self.stack.set_visible_child_name("dashboard")
         if self.spinner is not None:
             self.spinner.stop()
+        if not self.automatic_update_started and Path(__file__).resolve().parent == Path("/usr/lib/nexcode-ubuntu"):
+            self.automatic_update_started = True
+            self._check_updates(False)
+        return GLib.SOURCE_REMOVE
+
+    def _install_export_bridge(self, url: str) -> None:
+        origin = urlparse(url)
+        manager = self.webview.get_user_content_manager()
+        manager.remove_all_scripts()
+        script = """
+        (() => {
+          const listeners = new Set();
+          window.nexcodeNative = {
+            postMessage: message => window.webkit.messageHandlers.nexcode.postMessage(JSON.stringify(message)),
+            addEventListener: (type, listener) => { if (type === 'message') listeners.add(listener); },
+            removeEventListener: (type, listener) => { if (type === 'message') listeners.delete(listener); }
+          };
+          window.__nexcodeSaveResult = data => { for (const listener of listeners) listener({ data }); };
+        })();
+        """
+        manager.add_script(WebKit2.UserScript.new(
+            script, WebKit2.UserContentInjectedFrames.TOP_FRAME, WebKit2.UserScriptInjectionTime.START,
+            [f"{origin.scheme}://{origin.netloc}/*"], None,
+        ))
+
+    def _export_message(self, _manager, result) -> None:
+        if self.webview is None or not self._is_dashboard_uri(self.webview.get_uri() or ""):
+            return
+        request_id = None
+        status = "error"
+        owns_export = False
+        try:
+            raw = result.get_js_value().to_string()
+            # Extract only a bounded correlation id for a failure response.
+            if len(raw) <= 32 * 1024 * 1024 + 4096:
+                value = json.loads(raw)
+                candidate = value.get("requestId") if isinstance(value, dict) else None
+                if isinstance(candidate, str) and len(candidate) <= 128:
+                    request_id = candidate
+            message = parse_export_message(raw)
+            if self.export_busy:
+                return
+            self.export_busy = owns_export = True
+            filename = self._save_dialog(message["fileName"])
+            if filename is None:
+                status = "cancelled"
+            else:
+                save_markdown(Path(filename), message["content"])
+                status = "saved"
+        except (OSError, ValueError, GLib.Error):
+            status = "error"
+        finally:
+            if owns_export:
+                self.export_busy = False
+            if request_id is not None:
+                response = json.dumps({"type": "nexcode:save-markdown-result", "requestId": request_id, "status": status})
+                self.webview.run_javascript(f"window.__nexcodeSaveResult?.({response});", None, None, None)
+
+    def _save_dialog(self, filename: str) -> Optional[str]:
+        dialog = Gtk.FileChooserDialog(title="Export", parent=self.window, action=Gtk.FileChooserAction.SAVE)
+        dialog.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT)
+        dialog.set_do_overwrite_confirmation(True)
+        dialog.set_current_name(Path(filename.replace("\\", "/")).name or "export")
+        try:
+            return dialog.get_filename() if dialog.run() == Gtk.ResponseType.ACCEPT else None
+        finally:
+            dialog.destroy()
+
+    def _download_started(self, _context, download) -> None:
+        if self.webview is None or download.get_web_view() != self.webview:
+            return
+        uri = download.get_request().get_uri()
+        if not self._is_dashboard_uri(self.webview.get_uri() or "") or not (self._is_dashboard_uri(uri) or uri.startswith("blob:")):
+            download.cancel()
+            return
+        download.connect("decide-destination", self._download_destination)
+
+    def _download_destination(self, download, suggested: str) -> bool:
+        filename = self._save_dialog(suggested)
+        if filename is None:
+            download.cancel()
+        else:
+            download.set_allow_overwrite(True)
+            download.set_destination(Path(filename).as_uri())
+        return True
+
+    def _notice(self, text: str) -> None:
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True, message_type=Gtk.MessageType.INFO,
+                                   buttons=Gtk.ButtonsType.OK, text=text)
+        dialog.run()
+        dialog.destroy()
+
+    def _set_update_busy(self, busy: bool) -> None:
+        self.update_busy = busy
+        self.update_button.set_sensitive(not busy)
+        self.update_button.set_label("Updating…" if busy else "Check for Updates")
+
+    def _check_updates(self, manual: bool) -> None:
+        if self.update_busy:
+            return
+        self._set_update_busy(True)
+        def worker():
+            try:
+                current = _read_json(_runtime_root() / "package.json").get("version", "0.0.0")
+                release = check_for_update(current)
+                GLib.idle_add(self._update_available, release, manual)
+            except Exception:
+                GLib.idle_add(self._update_check_failed, manual)
+        threading.Thread(target=worker, name="nexcode-update-check", daemon=True).start()
+
+    def _update_check_failed(self, manual: bool) -> bool:
+        if not self.cancel.is_set():
+            self._set_update_busy(False)
+            if manual:
+                self._notice("Could not check for updates. Please try again later.")
+        return GLib.SOURCE_REMOVE
+
+    def _update_available(self, release: Optional[dict], manual: bool) -> bool:
+        if self.cancel.is_set():
+            return GLib.SOURCE_REMOVE
+        self._set_update_busy(False)
+        if release is None:
+            if manual:
+                self._notice("NexCode is up to date.")
+            return GLib.SOURCE_REMOVE
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.OK_CANCEL, text=f"Install NexCode {release['version']}?")
+        dialog.format_secondary_text("The signed Ubuntu package will be downloaded and verified. Ubuntu will ask for permission to install it. Reopen NexCode after installation.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            self._set_update_busy(True)
+            self.installing_update = True
+            self.hold()
+            threading.Thread(target=self._install_update, args=(release,), name="nexcode-update-install", daemon=True).start()
+        return GLib.SOURCE_REMOVE
+
+    def _install_update(self, release: dict) -> None:
+        stopped = False
+        try:
+            if Path(__file__).resolve().parent != Path("/usr/lib/nexcode-ubuntu"):
+                raise RuntimeError("Install the Ubuntu Debian package before using OTA updates.")
+            with tempfile.TemporaryDirectory(prefix="nexcode-ubuntu-update-") as temporary:
+                package = prepare_update(release, Path(temporary))
+                if self.cancel.is_set():
+                    return
+                self._stop_runtime()
+                stopped = True
+                result = subprocess.run([
+                    "/usr/bin/pkexec", "/usr/bin/apt-get", "install", "--yes", "--no-remove", str(package),
+                ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+                if result.returncode:
+                    raise RuntimeError("Installation was cancelled or failed. Your accounts have been preserved. Try again or install the release .deb manually.")
+            GLib.idle_add(self._update_installed)
+        except Exception as error:
+            GLib.idle_add(self._update_install_failed, str(error), stopped)
+        finally:
+            GLib.idle_add(self.release)
+
+    def _update_installed(self) -> bool:
+        self.installing_update = False
+        self._notice("Update installed. Reopen NexCode to use the new version.")
+        self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def _update_install_failed(self, message: str, stopped: bool) -> bool:
+        self.installing_update = False
+        if not self.cancel.is_set():
+            self._set_update_busy(False)
+            self._notice(message)
+            if stopped:
+                self._start_runtime()
         return GLib.SOURCE_REMOVE
 
     def _runtime_failed(self, message: str) -> bool:
@@ -360,7 +550,7 @@ class NexCodeApplication(Gtk.Application):
             return False
         target = urlparse(uri)
         runtime = urlparse(self.runtime_url)
-        return target.scheme in {"http", "https"} and target.netloc == runtime.netloc
+        return target.scheme == runtime.scheme and target.netloc == runtime.netloc
 
     def _decide_policy(self, _webview: WebKit2.WebView, decision: WebKit2.PolicyDecision, _kind: object) -> bool:
         if not isinstance(decision, WebKit2.NavigationPolicyDecision):
@@ -409,6 +599,9 @@ class NexCodeApplication(Gtk.Application):
         open_item = Gtk.MenuItem.new_with_label("Open NexCode")
         open_item.connect("activate", self._show_from_indicator)
         menu.append(open_item)
+        update_item = Gtk.MenuItem.new_with_label("Check for Updates")
+        update_item.connect("activate", lambda _item: self._check_updates(True))
+        menu.append(update_item)
         menu.append(Gtk.SeparatorMenuItem())
         quit_item = Gtk.MenuItem.new_with_label("Quit NexCode")
         quit_item.connect("activate", self._quit_from_indicator)
@@ -424,11 +617,17 @@ class NexCodeApplication(Gtk.Application):
         self.window.present()
 
     def _quit_from_indicator(self, _item: Gtk.MenuItem) -> None:
+        if self.installing_update:
+            self._notice("Please wait for the update installation to finish.")
+            return
         self.quit()
 
     def _quit_from_window(self, _window: Gtk.Window, _event: object) -> bool:
         if self.indicator is not None and self.window is not None:
             self.window.hide()
+            return True
+        if self.installing_update:
+            self._notice("Please wait for the update installation to finish.")
             return True
         self.quit()
         return True

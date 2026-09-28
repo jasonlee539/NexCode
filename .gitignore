@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+desktop/linux/**/__pycache__/
 *.log
 .DS_Store
 
