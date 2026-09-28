@@ -244,6 +244,9 @@ describe("headless GUI parity CLI", () => {
       ["/api/native-integrations", "(none — GUI-only)"],
       ["/api/debug", "nxc debug/observe"],
       ["/api/diagnostics", "nxc system"],
+      // Native desktop management (thread/skill files and process confirmation)
+      // is intentionally GUI-only; it is not a provider-proxy CLI resource.
+      ["/api/desktop", "(none — native desktop GUI-only)"],
       ["/api/effort", "nxc agent"],
       ["/api/grok", "nxc grok"],
       ["/api/injection", "nxc agent"],

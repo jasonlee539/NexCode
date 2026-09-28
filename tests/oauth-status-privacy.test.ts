@@ -97,7 +97,12 @@ describe("OAuth status privacy", () => {
     expect(stored).not.toContain("Bearer legacy");
     expect(stored).not.toContain("secret prompt");
     expect(stored).not.toContain("Bearer leaked");
-    expect(stored).not.toContain("jwt-secret");
+    // ID tokens are credential material needed for native account restoration.
+    // They belong in the private store, never in the public status DTO.
+    expect(stored).toContain('"idToken": "jwt-secret"');
+    const status = JSON.stringify(getLoginStatus("xai"));
+    expect(status).not.toContain("jwt-secret");
+    expect(status).not.toContain("idToken");
   });
 
   test("getLoginStatus ignores invalid legacy source metadata", async () => {

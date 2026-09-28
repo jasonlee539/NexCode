@@ -55,6 +55,7 @@ import { estimateComboCost, estimateRequestCost, normalizeCostTokens, tokensPerS
 import type { PersistedUsageAttempt } from "../usage/log";
 import { isAllowedManagementOrigin, jsonResponse, providerManagementConfigError, publicProviderBaseUrl, safeConfigDTO } from "./auth-cors";
 import { applySystemEnvToggle } from "./system-env";
+import { isManagementOnlyRuntime } from "../lib/runtime-mode";
 
 import type { ManagementApiDeps } from "./management/context";
 import { handleConfigRoutes } from "./management/config-routes";
@@ -64,6 +65,13 @@ import { handleRequestHistoryRoutes } from "./management/request-history-routes"
 import { handleAgentSettingsRoutes } from "./management/agent-settings-routes";
 import { handleSystemRoutes } from "./management/system-routes";
 import { handleDesktopRoutes } from "./management/desktop-routes";
+import { handleProviderRoutes } from "./management/provider-routes";
+import { handleModelRoutes } from "./management/model-routes";
+import { handleOauthAccountRoutes } from "./management/oauth-account-routes";
+import { handleComboRoutes } from "./management/combo-routes";
+import { handleIntegrationRoutes } from "./management/integration-routes";
+import { handleNativeIntegrationRoutes } from "./management/native-integration-routes";
+import { handleSidebarRoutes } from "./management/sidebar-routes";
 import type { ManagementContext } from "./management/context";
 import type { ManagementPrincipal } from "./management-auth";
 export type { ManagementApiDeps } from "./management/context";
@@ -120,6 +128,8 @@ const REMOVED_MANAGEMENT_NAMESPACES = [
   "/api/grok",
   "/api/shadow-call-settings",
   "/api/sidecar-settings",
+  "/api/github/star",
+  "/api/update/badge",
 ] as const;
 
 function removedManagementNamespace(pathname: string): boolean {
@@ -144,7 +154,9 @@ export async function handleManagementAPI(
       return jsonResponse({ error: "request body too large" }, 413, req, config);
     }
   }
-  if (removedManagementNamespace(url.pathname)) {
+  // Desktop deliberately removes these surfaces. The reusable proxy runtime still
+  // owns them; applying the desktop restriction globally breaks its management API.
+  if (isManagementOnlyRuntime() && removedManagementNamespace(url.pathname)) {
     return jsonResponse({ error: "management surface removed" }, 404, req, config);
   }
   async function convergeCodexCatalog(): Promise<CatalogDisposition> {
@@ -216,7 +228,29 @@ export async function handleManagementAPI(
   const ctx: ManagementContext = { req, url, config, deps, principal, convergeCodexCatalog, syncClaudeAgentDefsBestEffort };
   let routed: Response | null;
   try {
+    // Optional handlers load only when their namespace is requested. In particular,
+    // an ordinary dashboard/provider request must not import Compatibility Lab.
+    if (pathInManagementNamespace(url.pathname, "/api/lab")) {
+      const { handleLabAutomationRoutes } = await import("./management/lab-automation-routes");
+      const { handleLabRoutes } = await import("./management/lab-routes");
+      return (await handleLabAutomationRoutes(ctx)) ?? (await handleLabRoutes(ctx));
+    }
+    if (pathInManagementNamespace(url.pathname, "/api/routing-profiles")) {
+      const { handleRoutingProfileRoutes } = await import("./management/routing-profile-routes");
+      return await handleRoutingProfileRoutes(ctx);
+    }
+    if (pathInManagementNamespace(url.pathname, "/api/routing-analytics")) {
+      const { handleRoutingAnalyticsRoutes } = await import("./management/routing-analytics-routes");
+      return await handleRoutingAnalyticsRoutes(ctx);
+    }
     routed = (await handleConfigRoutes(ctx))
+    ??     (await handleProviderRoutes(ctx))
+    ??     (await handleModelRoutes(ctx))
+    ??     (await handleOauthAccountRoutes(ctx))
+    ??     (await handleComboRoutes(ctx))
+    ??     (await handleIntegrationRoutes(ctx))
+    ??     (await handleNativeIntegrationRoutes(ctx))
+    ??     (await handleSidebarRoutes(ctx))
     ??     (await handleStorageLogGuardRoutes(ctx))
     ??     (await handleLogsUsageRoutes(ctx))
     ??     (await handleRequestHistoryRoutes(ctx))

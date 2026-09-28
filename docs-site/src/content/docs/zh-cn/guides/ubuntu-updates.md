@@ -21,5 +21,9 @@ NexCode。取消授权或安装失败时会重新启动本地管理服务。账�
 账号切换使用加密的原生登录档案，保留 Codex 刷新的凭据，并支持切回原始登录。
 缺少身份令牌的旧账号会要求重新登录。切换后重新打开 Codex，即可使用所选账号。
 
+Ubuntu 启动器设置 `NEXCODE_MANAGEMENT_ONLY=1`：模型代理端点及通用服务商、客户端集成、
+Lab 管理 API 仍不可用。不设置该标志的通用 CLI 代理运行时保留需要认证的管理 API。
+这一模式区分不会在桌面界面中重新添加服务商页面。
+
 维护者发布升级包时请参照
 [UBUNTU.md](https://github.com/jasonlee539/NexCode/blob/Ubuntu/UBUNTU.md) 的签名流程。

@@ -76,22 +76,22 @@ describe("provider rail source contract", () => {
     const { hashBelongsToPage, resolveAppHashChange } = await import("../gui/src/app-routing");
     // WP5 (Q1): the dual-layout hash is no longer a Providers route. It must not belong,
     // and it must be passively replaced so an old bookmark still lands somewhere real.
-    expect(hashBelongsToPage("providers/workspace", "providers")).toBe(false);
-    expect(hashBelongsToPage("providers", "providers")).toBe(true);
-    expect(hashBelongsToPage("providers/other", "providers")).toBe(false);
-    expect(hashBelongsToPage("providers/workspace/extra", "providers")).toBe(false);
+    expect(hashBelongsToPage("providers/workspace", "codex-auth")).toBe(false);
+    expect(hashBelongsToPage("codex-auth", "codex-auth")).toBe(true);
+    expect(hashBelongsToPage("providers/other", "codex-auth")).toBe(false);
+    expect(hashBelongsToPage("providers/workspace/extra", "codex-auth")).toBe(false);
 
     const legacy = resolveAppHashChange("providers/workspace");
-    expect(legacy.page).toBe("providers");
-    expect(legacy.replaceTo).toBe("providers");
+    expect(legacy.page).toBe("codex-auth");
+    expect(legacy.replaceTo).toBe("codex-auth");
     // Unknown suffixes collapse to the bare page rather than 404.
-    expect(resolveAppHashChange("providers/other").replaceTo).toBe("providers");
+    expect(resolveAppHashChange("providers/other").replaceTo).toBe("codex-auth");
 
     const routing = await Bun.file("gui/src/app-routing.ts").text();
     const routeState = await Bun.file("gui/src/use-app-route-state.ts").text();
     const app = await Bun.file("gui/src/App.tsx").text();
-    expect(routing).toContain('rawHash === "providers/workspace"');
-    expect(routing).toContain("hashBelongsToPage(rawHash, nextPage)");
+    expect(routing).toContain('providers: "codex-auth"');
+    expect(routing).toContain("replaceTo: rawHash === page ? null : page");
     /*
      * The hook used to re-implement this redirect with its own literal, which
      * is what these assertions pinned. It now delegates to the one resolver,

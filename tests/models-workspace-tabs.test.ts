@@ -1,9 +1,8 @@
 /**
  * Models workspace tabs — routing contract.
  *
- * Legacy standalone Combos, Routing, and Lab hashes resolve to Models and redirect to
- * their nested tab hashes. `readModelsTab` also recognizes the pre-redirect form so a
- * cold load lands on the intended tab without a transient page mismatch.
+ * Desktop redirects retired Models, Combos, Routing, and Lab bookmarks to Dashboard.
+ * The reusable Models tab helpers retain their independent legacy contract.
  */
 import { expect, test, describe } from "bun:test";
 import {
@@ -21,30 +20,18 @@ import {
   type ModelsTab,
 } from "../gui/src/pages/models-tab";
 
-describe("nested Models hashes", () => {
-  test("all tab hashes are registered and belong to the models page", () => {
-    expect([...MODELS_TAB_HASHES]).toEqual(["models/combos", "models/routing", "models/compatibility"]);
-    for (const hash of MODELS_TAB_HASHES) {
-      expect(hashBelongsToPage(hash, "models")).toBe(true);
-      expect(readPageFromHash(hash)).toBe("models");
-    }
+describe("retired Models hashes in Desktop", () => {
+  test("no Models tab is registered as a desktop destination", () => {
+    expect([...MODELS_TAB_HASHES]).toEqual([]);
   });
 
-  test("the bare page hash still belongs to models", () => {
-    expect(hashBelongsToPage("models", "models")).toBe(true);
-    expect(resolveAppHashChange("models").replaceTo).toBeNull();
-  });
-
-  test("an unregistered sub-hash is normalised away instead of rendering a blank tab", () => {
-    expect(hashBelongsToPage("models/nope", "models")).toBe(false);
-    expect(resolveAppHashChange("models/nope")).toEqual({ page: "models", replaceTo: "models" });
-  });
-
-  test("a registered tab hash survives resolution untouched", () => {
-    for (const hash of MODELS_TAB_HASHES) {
-      expect(resolveAppHashChange(hash)).toEqual({ page: "models", replaceTo: null });
-    }
-  });
+  test.each(["models", "models/nope", "models/combos", "models/routing", "models/compatibility"])(
+    "%s redirects to Dashboard without rendering a retired page", hash => {
+      expect(readPageFromHash(hash)).toBe("dashboard");
+      expect(hashBelongsToPage(hash, "dashboard")).toBe(false);
+      expect(resolveAppHashChange(hash)).toEqual({ page: "dashboard", replaceTo: "dashboard" });
+    },
+  );
 });
 
 describe("readModelsTab", () => {
@@ -98,9 +85,11 @@ describe("modelsTabHash", () => {
     expect(modelsTabHash("compatibility")).toBe("models/compatibility");
   });
 
-  test("every non-catalog hash is registered for normalization", () => {
+  test("every non-catalog helper hash redirects out of the desktop", () => {
     const nested = MODELS_TABS.filter((tab): tab is Exclude<ModelsTab, "catalog"> => tab !== "catalog");
-    expect(nested.map(modelsTabHash).sort()).toEqual([...MODELS_TAB_HASHES].sort());
+    for (const tab of nested) {
+      expect(resolveAppHashChange(modelsTabHash(tab))).toEqual({ page: "dashboard", replaceTo: "dashboard" });
+    }
   });
 });
 
@@ -111,25 +100,25 @@ test("tab and panel dom ids are distinct per tab, so aria-controls cannot collid
   expect(modelsPanelDomId("combos")).toBe("models-panel-combos");
 });
 
-test("an unregistered deep hash normalises to the bare page, matching readModelsTab", () => {
+test("an unregistered deep hash redirects to Dashboard while the helper defaults to catalog", () => {
   for (const stray of ["models/combos/extra", "models/routing/extra"]) {
-    expect(hashBelongsToPage(stray, "models")).toBe(false);
-    expect(resolveAppHashChange(stray)).toEqual({ page: "models", replaceTo: "models" });
+    expect(hashBelongsToPage(stray, "dashboard")).toBe(false);
+    expect(resolveAppHashChange(stray)).toEqual({ page: "dashboard", replaceTo: "dashboard" });
     expect(readModelsTab(`#${stray}`)).toBe("catalog");
   }
 });
 
 describe("legacy lab hash", () => {
-  test("#lab redirects to models/compatibility and resolves Models immediately", () => {
-    expect(resolveAppHashChange("lab")).toEqual({ page: "models", replaceTo: "models/compatibility" });
+  test("#lab redirects to Dashboard", () => {
+    expect(resolveAppHashChange("lab")).toEqual({ page: "dashboard", replaceTo: "dashboard" });
     expect(readModelsTab("#lab")).toBe("compatibility");
-    expect(readPageFromHash("#lab")).toBe("models");
+    expect(readPageFromHash("#lab")).toBe("dashboard");
   });
 
   test("the nested legacy form keeps its destination", () => {
-    expect(resolveAppHashChange("lab/anything")).toEqual({ page: "models", replaceTo: "models/compatibility" });
+    expect(resolveAppHashChange("lab/anything")).toEqual({ page: "dashboard", replaceTo: "dashboard" });
     expect(readModelsTab("#lab/anything")).toBe("compatibility");
-    expect(readPageFromHash("#lab/anything")).toBe("models");
+    expect(readPageFromHash("#lab/anything")).toBe("dashboard");
   });
 
   test("legacy lab matching is delimiter-aware, not prefix-aware", () => {

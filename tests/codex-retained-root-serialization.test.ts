@@ -442,11 +442,12 @@ test("two processes at the post-approval management seam serialize instead of in
 
   const routeScript = (marker: string) => `
     import { existsSync, writeFileSync } from "node:fs";
-    // The stub lives on globalThis, NOT on the provider row. Catalog admission
+    import { spyOn } from "bun:test";
+    // Stub the outbound transport, NOT the provider row. Catalog admission
     // encodes the config to derive its identity and refuses a function member, so
     // a per-provider \`fetch\` makes the seam throw before it can converge — which
     // looked exactly like a production defect until the encoder said so.
-    globalThis.fetch = async () => {
+    const discoveryFetch = async () => {
       writeFileSync(${JSON.stringify(barrier)} + "-" + ${JSON.stringify(marker)}, "here");
       const deadline = Date.now() + 8000;
       while (Date.now() < deadline) {
@@ -455,6 +456,12 @@ test("two processes at the post-approval management seam serialize instead of in
       }
       return Response.json({ data: [{ id: "seam-model-" + ${JSON.stringify(marker)} }] });
     };
+    // Catalog discovery uses the pinned transport, not globalThis.fetch. Keep
+    // both network and config-time DNS outside this cross-process lock test.
+    const outbound = await import("./src/lib/provider-outbound.ts");
+    spyOn(outbound, "providerOutboundGet").mockImplementation(discoveryFetch);
+    const destination = await import("./src/lib/destination-policy.ts");
+    spyOn(destination, "providerDestinationResolvedError").mockResolvedValue(null);
     const config = {
       port: 10100,
       defaultProvider: "together",

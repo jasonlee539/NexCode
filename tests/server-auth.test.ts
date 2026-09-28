@@ -889,12 +889,14 @@ describe("server local API auth", () => {
         "port",
         "providerReloadCapability",
         "restartCapability",
+        "runtimeMode",
         "service",
         "status",
         "uptime",
         "version",
       ]);
       expect(healthBody.restartCapability).toBe(SYSTEM_RESTART_CAPABILITY_VERSION);
+      expect(healthBody.runtimeMode).toBe("proxy");
       expect(healthBody.providerReloadCapability).toBe(LOCAL_PROVIDER_RELOAD_CAPABILITY_VERSION);
       expect("rss" in healthBody).toBe(false);
     } finally {

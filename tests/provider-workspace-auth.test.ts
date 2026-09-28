@@ -232,7 +232,7 @@ describe("workspace account integration seam", () => {
       Bun.file("gui/src/components/CodexAccountPool.tsx").text(),
     ]);
     expect(panel).not.toContain("copyDoctor");
-    expect(pool).toContain("const showDoctorCopy = !embedded;");
+    expect(pool).toContain("const showDoctorCopy = !embedded && !simple;");
     expect(pool).toContain("onCopyDoctor={showDoctorCopy ? copyDoctor : undefined}");
   });
 });

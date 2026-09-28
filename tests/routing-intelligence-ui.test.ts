@@ -10,19 +10,19 @@ import {
 
 const guiRoot = join(import.meta.dir, "..", "gui", "src");
 
-test("routing is a Models tab with a registered nested hash", () => {
+test("desktop redirects retired routing and combo bookmarks to Dashboard", () => {
   // It used to be a first-class page. Both ids are gone from the union now, and the
   // old top-level hashes keep working through a passive redirect.
   expect(VALID_PAGES.has("routing" as never)).toBe(false);
   expect(VALID_PAGES.has("combos" as never)).toBe(false);
 
-  expect(readPageFromHash("models/routing")).toBe("models");
-  expect(hashBelongsToPage("models/routing", "models")).toBe(true);
-  expect(resolveAppHashChange("models/routing").replaceTo).toBeNull();
+  expect(readPageFromHash("models/routing")).toBe("dashboard");
+  expect(hashBelongsToPage("models/routing", "dashboard")).toBe(false);
+  expect(resolveAppHashChange("models/routing").replaceTo).toBe("dashboard");
 
-  expect(resolveAppHashChange("routing")).toEqual({ page: "models", replaceTo: "models/routing" });
-  expect(resolveAppHashChange("routing/anything")).toEqual({ page: "models", replaceTo: "models/routing" });
-  expect(resolveAppHashChange("combos")).toEqual({ page: "models", replaceTo: "models/combos" });
+  expect(resolveAppHashChange("routing")).toEqual({ page: "dashboard", replaceTo: "dashboard" });
+  expect(resolveAppHashChange("routing/anything")).toEqual({ page: "dashboard", replaceTo: "dashboard" });
+  expect(resolveAppHashChange("combos")).toEqual({ page: "dashboard", replaceTo: "dashboard" });
 });
 
 test("Routing page wires profile CRUD, dry-run, and analytics against management APIs", () => {

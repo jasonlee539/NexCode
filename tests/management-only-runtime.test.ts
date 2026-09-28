@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startServer } from "../src/server";
+import { managementFetch } from "./helpers/management-auth";
 
 let testHome = "";
 let previousNexcodeHome: string | undefined;
@@ -40,6 +41,14 @@ test("management listener advertises its mode and rejects every model data-plane
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
     }
+
+    // Desktop's smaller surface is not an authentication bypass. Unauthenticated
+    // callers are rejected by admission; authenticated callers reach the mode gate.
+    const providers = new URL("/api/providers", server.url);
+    expect((await fetch(providers)).status).toBe(401);
+    const removed = await managementFetch(providers);
+    expect(removed.status).toBe(404);
+    expect(await removed.json()).toEqual({ error: "management surface removed" });
   } finally {
     await server.stop(true);
   }

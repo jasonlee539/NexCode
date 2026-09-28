@@ -1833,9 +1833,11 @@ describe("fetchProviderQuotaReports", () => {
       expect(openai?.aggregation).toMatchObject({
         presentation: "coverage-only",
         includedAccounts: 0,
-        staleQuotaAccounts: 1,
-        missingQuotaAccounts: 1,
-        unknownPlanAccounts: 1,
+        // The warm-up fetched both the effective account and the added account.
+        // Both samples expire; neither loses its known plan or becomes "missing".
+        staleQuotaAccounts: 2,
+        missingQuotaAccounts: 0,
+        unknownPlanAccounts: 0,
         incomplete: true,
         currentAccount: { plan: "prolite", quota: null },
       });

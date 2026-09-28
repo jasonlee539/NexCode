@@ -18,6 +18,7 @@ import type { NxcConfig } from "../src/types";
 import { ANTIGRAVITY_REQUEST_UA } from "../src/adapters/google-antigravity-wire";
 import { fakeChatGptJwt } from "./helpers/fake-chatgpt-jwt";
 import { installIsolatedCodexHome, type IsolatedCodexHome } from "./helpers/isolated-codex-home";
+import { installAntigravityTestClient } from "./helpers/antigravity-oauth-env";
 
 const previousApiToken = process.env.NEXCODE_API_AUTH_TOKEN;
 const previousNexcodeHome = process.env.NEXCODE_HOME;
@@ -26,8 +27,10 @@ const originalFetch = globalThis.fetch;
 const TEST_DIR = join(import.meta.dir, ".tmp-server-images-test");
 let isolatedCodexHome: IsolatedCodexHome | null = null;
 const DIRECT_CHATGPT_TOKEN = fakeChatGptJwt({ chatgpt_account_id: "acct-123" });
+let restoreTestClient: () => void;
 
 beforeEach(() => {
+  restoreTestClient = installAntigravityTestClient();
   if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   mkdirSync(TEST_DIR, { recursive: true });
   process.env.NEXCODE_HOME = TEST_DIR;
@@ -42,6 +45,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreTestClient();
   globalThis.fetch = originalFetch;
   if (previousApiToken === undefined) delete process.env.NEXCODE_API_AUTH_TOKEN;
   else process.env.NEXCODE_API_AUTH_TOKEN = previousApiToken;

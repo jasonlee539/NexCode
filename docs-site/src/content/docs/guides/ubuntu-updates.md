@@ -29,5 +29,10 @@ refreshed by Codex. You can return to the original login. Legacy accounts lackin
 an identity token ask for reauthentication before switching. Close and reopen
 Codex after switching to use the selected account.
 
+The Ubuntu launcher runs with `NEXCODE_MANAGEMENT_ONLY=1`: model proxy endpoints
+and generic provider, integration and Lab management APIs remain unavailable.
+The reusable CLI proxy runtime (without that flag) retains its authenticated
+management APIs. This distinction does not add provider pages to the desktop.
+
 Release maintainers should follow the signed-package procedure in
 [UBUNTU.md](https://github.com/jasonlee539/NexCode/blob/Ubuntu/UBUNTU.md).

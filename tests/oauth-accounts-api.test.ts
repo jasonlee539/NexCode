@@ -13,11 +13,13 @@ import { withStubbedProviderFetch } from "./helpers/catalog-provider-fetch";
 import { getAccountSet } from "../src/oauth/store";
 import { ACCOUNT_IMPORT_DEADLINE_MS, ACCOUNT_IMPORT_MAX_BYTES, ACCOUNT_IMPORT_MAX_REQUEST_BYTES } from "../src/oauth/account-import/types";
 import { handleOauthAccountRoutes } from "../src/server/management/oauth-account-routes";
+import { installAntigravityTestClient } from "./helpers/antigravity-oauth-env";
 
 let testDir = "";
 let previousHome: string | undefined;
 let isolatedCodexHome: IsolatedCodexHome | null = null;
 const originalFetch = globalThis.fetch;
+let restoreTestClient: () => void;
 
 const gatherRoutedModels: typeof gatherRoutedModelsDirect = config =>
   gatherRoutedModelsDirect(withStubbedProviderFetch(config));
@@ -46,6 +48,7 @@ function writeAccounts(): void {
 }
 
 beforeEach(() => {
+  restoreTestClient = installAntigravityTestClient();
   previousHome = process.env.NEXCODE_HOME;
   isolatedCodexHome = installIsolatedCodexHome("nxc-oauth-accounts-codex-");
   testDir = mkdtempSync(join(tmpdir(), "nxc-oauth-accounts-"));
@@ -55,6 +58,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  restoreTestClient();
   globalThis.fetch = originalFetch;
   clearModelCache("google-antigravity");
   if (previousHome === undefined) delete process.env.NEXCODE_HOME;

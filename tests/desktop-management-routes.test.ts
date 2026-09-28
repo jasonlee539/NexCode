@@ -477,12 +477,49 @@ describe("desktop management routes", () => {
     expect(signals).toEqual(["4321:SIGTERM", "4321:SIGKILL"]);
   });
 
-  test("generic provider management namespaces return 404", async () => {
-    const req = new Request("http://localhost:10100/api/providers", {
-      headers: { Host: "localhost:10100" },
-    });
-    const response = await handleManagementAPI(req, new URL(req.url), config);
-    expect(response?.status).toBe(404);
-    expect(await response?.json()).toEqual({ error: "management surface removed" });
+  test("desktop mode rejects every removed management namespace before dispatch", async () => {
+    const previousMode = process.env.NEXCODE_MANAGEMENT_ONLY;
+    process.env.NEXCODE_MANAGEMENT_ONLY = "1";
+    try {
+      for (const path of [
+        "config", "providers", "provider-quotas", "provider-context-caps",
+        "provider-presets", "provider-request-pacing", "models", "catalog",
+        "disabled-models", "model-visibility", "selected-models", "custom-models",
+        "oauth", "key-providers", "keys", "combos", "routing-profiles",
+        "routing-analytics", "lab", "client-config", "client-integrations",
+        "native-integrations", "claude-code", "claude-desktop", "grok",
+        "shadow-call-settings", "sidecar-settings",
+        "github/star", "update/badge",
+      ]) {
+        for (const suffix of ["", "/nested"]) {
+          for (const method of ["GET", "POST", "PUT", "DELETE"]) {
+            const req = new Request(`http://localhost:10100/api/${path}${suffix}`, {
+              method,
+              headers: { Host: "localhost:10100" },
+            });
+            const response = await handleManagementAPI(req, new URL(req.url), config);
+            expect(response?.status).toBe(404);
+            expect(await response?.json()).toEqual({ error: "management surface removed" });
+          }
+        }
+      }
+    } finally {
+      if (previousMode === undefined) delete process.env.NEXCODE_MANAGEMENT_ONLY;
+      else process.env.NEXCODE_MANAGEMENT_ONLY = previousMode;
+    }
+  });
+
+  test("the generic runtime retains provider reads outside desktop mode", async () => {
+    const previousMode = process.env.NEXCODE_MANAGEMENT_ONLY;
+    delete process.env.NEXCODE_MANAGEMENT_ONLY;
+    try {
+      const req = new Request("http://localhost:10100/api/providers", {
+        headers: { Host: "localhost:10100" },
+      });
+      const response = await handleManagementAPI(req, new URL(req.url), config);
+      expect(response?.status).toBe(200);
+    } finally {
+      if (previousMode !== undefined) process.env.NEXCODE_MANAGEMENT_ONLY = previousMode;
+    }
   });
 });
